@@ -199,10 +199,22 @@ static void printrng() {
 static void rdch( void ) {
 RETRY:
     ch = fgetc( stdin );
+REEVALUATE:
     if ( ch == EOF ) return;
     if ( lno == 0 ) { ++lno; chx = 0; }
     if ( ch == '\r' ) goto RETRY;
     if ( ch == '\n' ) { ++lno; chx = 0; goto RETRY; }
+    if ( ch == '-'  ) {
+        ch = fgetc( stdin );
+        if ( ch != '-' ) {
+            ungetc( ch, stdin );
+            ch = '-';
+        } else {
+            // -- comment
+            do { ch = fgetc( stdin ); } while ( ch != '\n' && ch != EOF );
+            goto REEVALUATE;
+        }
+    }
     ++chx;
     storech();
 }
@@ -455,6 +467,11 @@ static treenode_t* read_and_expr( void ) {
         expr = read_base_expr();
         if ( expr == 0 ) break;
     }
+    if ( node->numBranches == 1 ) {
+        expr = node->branches[0]; node->branches[0] = 0;
+        delete_node( node );
+        return expr;
+    }
     return node;
 }
 
@@ -470,6 +487,11 @@ static treenode_t* read_or_expr( void ) {
         rdch();
         expr = read_and_expr();
         if ( expr == 0 ) report( "expression expected after '|'" );
+    }
+    if ( node->numBranches == 1 ) {
+        expr = node->branches[0]; node->branches[0] = 0;
+        delete_node( node );
+        return expr;
     }
     return node;
 }
