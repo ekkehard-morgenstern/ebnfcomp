@@ -29,7 +29,7 @@
 language syntax:
 
 identifier  := /[a-z0-9-]+/ .
-str-literal := '[^']+' | "[^"]+" .
+str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of regular expressions, whitespace skipping will be disabled
 re-any      := '.' .
@@ -107,12 +107,12 @@ static void* xmalloc( size_t size ) {
     return blk;
 }
 
-static void* xrealloc( void** pBlk, size_t newSize ) {
+static void xrealloc( void** pBlk, size_t newSize ) {
     size_t reqSize = newSize ? newSize : 0U;
     if ( *pBlk == 0 ) {
-        *pBlk = xmalloc( newSize );
+        *pBlk = xmalloc( reqSize );
     } else {
-        void* newBlk = realloc( *pBlk, newSize );
+        void* newBlk = realloc( *pBlk, reqSize );
         if ( newBlk == 0 ) {
             fprintf( stderr, "? out of memory\n" );
             exit( EXIT_FAILURE );
@@ -242,7 +242,7 @@ static treenode_t* read_identifier( void ) {
 }
 
 static treenode_t* read_str_literal( void ) {
-    // str-literal := '[^']+' | "[^"]+" .
+    // str-literal := /'[^']+'/ | /"[^"]+"/ .
     char tmp[256];
     int  ix = 0;
     int  term = ch;
@@ -540,13 +540,39 @@ static treenode_t* read_prod_list( void ) {
     return node;
 }
 
+static void help( void ) {
+    printf( "%s",
+        "usage: ebnfcomp [options]\n"
+        "options:\n"
+        "    --help, -h                 (this)\n"
+        "    --tree, -t                 output syntax tree\n"
+        "default behavior:\n"
+        "    compiles EBNF specified on standard input to internal form,\n"
+        "    then outputs C code for table-directed parsing to standard \n"
+        "    output.\n"
+    );
+}
+
 int main( int argc, char** argv ) {
+
+    bool printTree = false;
+
+    for ( int i=1; i < argc; ++i ) {
+        const char* arg = argv[i];
+        if ( strcmp( arg, "--help" ) == 0 || strcmp( arg, "-h" ) == 0 ) {
+            help();
+            return EXIT_SUCCESS;
+        }
+        if ( strcmp( arg, "--tree" ) == 0 || strcmp( arg, "-t" ) == 0 ) {
+            printTree = true;
+        }
+    }
 
     rdch();
     treenode_t* prodlist = read_prod_list();
     if ( prodlist == 0 ) report( "production list expected" );
 
-    dump_tree_node( prodlist, 0 );
+    if ( printTree ) { dump_tree_node( prodlist, 0 ); return EXIT_SUCCESS; }
 
-    return 0;
+    return EXIT_SUCCESS;
 }

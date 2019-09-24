@@ -35,7 +35,7 @@ you plan to use does not support automatic whitespace elimination.
 The syntax of this EBNF, written in itself, is as follows (whitespace omitted):
 
 identifier  := /[a-z0-9-]+/ .
-str-literal := '[^']+' | "[^"]+" .
+str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of regular expressions, whitespace skipping will be disabled
 re-any      := '.' .
