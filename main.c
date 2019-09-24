@@ -144,7 +144,7 @@ static treenode_t* create_node( token_t token, const char* text ) {
     treenode_t* node = (treenode_t*) xmalloc( sizeof(treenode_t) );
     node->token    = token;
     node->text     = text ? xstrdup(text) : 0;
-    node->branches = (struct _treenode_t**) xmalloc( sizeof(struct _treenode_t**) * 5U );
+    node->branches = (struct _treenode_t**) xmalloc( sizeof(struct _treenode_t*) * 5U );
     node->branchAlloc = 5U;
     node->numBranches = 0U;
     return node;
@@ -165,7 +165,7 @@ static void delete_node( treenode_t* node ) {
 static void add_branch( treenode_t* node, treenode_t* branch ) {
     if ( node->numBranches >= node->branchAlloc ) {
         size_t newSize = node->branchAlloc * 2U;
-        xrealloc( (void**)(node->branches), sizeof(struct _treenode_t**) * newSize );
+        xrealloc( (void**)(&node->branches), sizeof(struct _treenode_t*) * newSize );
         node->branchAlloc = newSize;
     }
     node->branches[ node->numBranches++ ] = branch;
@@ -252,6 +252,7 @@ static treenode_t* read_str_literal( void ) {
     } while ( ch != term && ch != EOF );
     rdch();
     if ( ix == 0 ) report( "string literal is empty" );
+    tmp[ix] = '\0';
     return create_node( T_STR_LITERAL, tmp );
 }
 
