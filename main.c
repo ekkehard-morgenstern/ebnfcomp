@@ -711,7 +711,7 @@ static void output_impls_helper( treenode_t* node ) {
         }
         char branchesIdent[256];
         if ( node->numBranches != 0 ) {
-            snprintf( branchesIdent, 256U, "branches_%s", node->exportIdent );
+            snprintf( branchesIdent, 256U, "%s_branches", node->exportIdent );
             printf( "static const parsingnode_t* const %s[%d] = {\n    ", 
                 branchesIdent, (int) node->numBranches );
             for ( size_t i=0; i < node->numBranches; ++i ) {
