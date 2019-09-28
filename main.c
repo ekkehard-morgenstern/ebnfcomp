@@ -22,6 +22,7 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -731,6 +732,16 @@ static int find_prod_id( treenode_t* node, const char* name ) {
     return -1;
 }
 
+static void report2( const char* fmt, ... ) {
+    va_list ap;
+    va_start( ap, fmt );
+    fprintf( stderr, "? " );
+    vfprintf( stderr, fmt, ap );
+    fprintf( stderr, "\n" );
+    va_end( ap );
+    exit( EXIT_FAILURE );
+}
+
 static int output_branches_helper( treenode_t* node, int index ) {
     if ( node == 0 ) return 0;
     if ( node->id >= 0 && node->branchesIx == index ) {
@@ -742,6 +753,7 @@ static int output_branches_helper( treenode_t* node, int index ) {
             } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
                 printf( "%d, ", id );
             } else {
+                if ( branch->token == T_IDENTIFIER ) report2( "production '%s' not found", branch->text );
                 printf( "-1 /* %s */, ", token2text(branch->token) );
             }
         }
@@ -844,10 +856,6 @@ static void output_code( void ) {
         "    size_t             numBranches;\n"
         "    int                branches;\n"
         "} parsingnode_t;\n\n"
-        "// declarations (ONLY works in C!)\n"
-        "#ifdef _cplusplus\n"
-        "#error \"the following code will not work in C++!\"\n"
-        "#endif\n\n"
     );
     output_decls_helper( tree );
     printf(
