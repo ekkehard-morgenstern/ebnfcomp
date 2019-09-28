@@ -99,6 +99,9 @@ typedef struct _treenode_t {
     char*                   nodeTypeEnum;
     int                     id;
     int                     branchesIx;
+    int                     refCnt;
+    bool                    branchesOutput;
+    bool                    implOutput;
 } treenode_t;
 
 static void* xmalloc( size_t size ) {
@@ -155,10 +158,14 @@ static treenode_t* create_node( token_t token, const char* text ) {
     node->nodeTypeEnum = 0;
     node->id           = -1;
     node->branchesIx   = -1;
+    node->refCnt       = 1;
+    node->branchesOutput = false;
+    node->implOutput     = false;
     return node;
 }
 
 static void delete_node( treenode_t* node ) {
+    if ( --node->refCnt > 0 ) return;
     node->branchesIx = -1;
     node->id         = -1;
     if ( node->nodeTypeEnum ) { free( node->nodeTypeEnum ); node->nodeTypeEnum = 0; }
@@ -562,6 +569,37 @@ static treenode_t* read_prod_list( void ) {
     return node;
 }
 
+static treenode_t* tree = 0;
+
+static treenode_t* find_literal_helper( treenode_t* query, treenode_t* node, const char* text, token_t token ) {
+    if ( node == 0 || node == query ) return 0;
+    if ( node->token == token && strcmp( node->text, text ) == 0 ) return node;
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        treenode_t* result = find_literal_helper( query, node->branches[i], text, token );
+        if ( result ) return result;
+    }
+    return 0;
+}
+
+static treenode_t* find_literal( treenode_t* query, const char* text, token_t token ) {
+    return find_literal_helper( query, tree, text, token );
+}
+
+static void deduplicate_literals( treenode_t** pBranch, treenode_t* node ) {
+    if ( node == 0 ) return;
+    if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
+        treenode_t* found = find_literal( node, node->text, node->token );
+        if ( found ) {
+            *pBranch = found; found->refCnt++;
+            delete_node( node );
+            return;
+        }
+    }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        deduplicate_literals( &node->branches[i], node->branches[i] );
+    }
+}
+
 static void help( void ) {
     printf( "%s",
         "usage: ebnfcomp [options]\n"
@@ -602,7 +640,7 @@ static int id = 0;
 
 static void output_enums_helper( treenode_t* node ) {
     if ( node == 0 ) return;
-    if ( is_export_node( node ) ) {
+    if ( is_export_node( node ) && node->id == -1 ) {       
         char tmp[256]; bool print = true;
         if ( node->token == T_PRODUCTION ) {
             name_to_C_enum( tmp, node->text );
@@ -616,10 +654,8 @@ static void output_enums_helper( treenode_t* node ) {
         if ( print ) printf( "    %s,\n", tmp );
         node->id = id++;
     }
-    if ( node->numBranches != 0U ) {
-        for ( size_t i=0; i < node->numBranches; ++i ) {
-            output_enums_helper( node->branches[i] );
-        }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        output_enums_helper( node->branches[i] );
     }
 }
 
@@ -656,7 +692,7 @@ static int branches_ix = 0;
 
 static void output_decls_helper( treenode_t* node ) {
     if ( node == 0 ) return;
-    if ( node->id >= 0 ) {
+    if ( node->id >= 0 && node->exportIdent == 0 ) {
         const char* prefix = ""; bool numId = node->token != T_PRODUCTION;
         switch ( node->token ) {
             case T_PRODUCTION:      prefix = "production_"; break;
@@ -680,55 +716,54 @@ static void output_decls_helper( treenode_t* node ) {
             branches_ix += node->numBranches;
         }
     }
-    if ( node->numBranches != 0U ) {
-        for ( size_t i=0; i < node->numBranches; ++i ) {
-            output_decls_helper( node->branches[i] );
-        }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        output_decls_helper( node->branches[i] );
     }
 }
-
-static treenode_t* tree = 0;
 
 static int find_prod_id( treenode_t* node, const char* name ) {
     if ( node == 0 ) return -1;
     if ( node->token == T_PRODUCTION && strcmp( node->text, name ) == 0 ) return node->id;
-    if ( node->numBranches != 0U ) {
-        for ( size_t i=0; i < node->numBranches; ++i ) {
-            int id = find_prod_id( node->branches[i], name );
-            if ( id >= 0 ) return id;
-        }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        int id = find_prod_id( node->branches[i], name );
+        if ( id >= 0 ) return id;
     }
     return -1;
 }
 
-static void output_branches_helper( treenode_t* node ) {
-    if ( node == 0 ) return;
-    if ( node->id >= 0 ) {
-        if ( node->branchesIx >= 0 ) {
-            printf( "    // %d: %s branches\n    ", node->branchesIx, node->exportIdent );
-            for ( size_t i=0; i < node->numBranches; ++i ) {
-                treenode_t* branch = node->branches[i]; int id;
-                if ( branch->id >= 0 ) {
-                    printf( "%d, ", branch->id );
-                } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
-                    printf( "%d, ", id );
-                } else {
-                    printf( "-1 /* %s */, ", token2text(branch->token) );
-                }
-            }
-            printf( "\n" );
-        }
-    }
-    if ( node->numBranches != 0U ) {
+static int output_branches_helper( treenode_t* node, int index ) {
+    if ( node == 0 ) return 0;
+    if ( node->id >= 0 && node->branchesIx == index ) {
+        printf( "    // %d: %s branches\n    ", node->branchesIx, node->exportIdent );
         for ( size_t i=0; i < node->numBranches; ++i ) {
-            output_branches_helper( node->branches[i] );
+            treenode_t* branch = node->branches[i]; int id;
+            if ( branch->id >= 0 ) {
+                printf( "%d, ", branch->id );
+            } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
+                printf( "%d, ", id );
+            } else {
+                printf( "-1 /* %s */, ", token2text(branch->token) );
+            }
         }
+        printf( "\n" );
+        return node->numBranches;
+    }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        int n = output_branches_helper( node->branches[i], index );
+        if ( n ) return n;
+    }
+    return 0;
+}
+
+static void output_branches( void ) {
+    for ( int i=0; i < branches_ix; ) {
+        i += output_branches_helper( tree, i );
     }
 }
 
-static void output_impls_helper( treenode_t* node ) {
-    if ( node == 0 ) return;
-    if ( node->id >= 0 ) {
+static bool output_impls_helper( treenode_t* node, int id ) {
+    if ( node == 0 ) return false;
+    if ( node->id == id ) {
         bool numId = node->token != T_PRODUCTION;
         char text[256]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
         text[0] = '0'; text[1] = '\0';
@@ -763,11 +798,17 @@ static void output_impls_helper( treenode_t* node ) {
             , nodeClass, node->nodeTypeEnum, termType, text
             , (int) node->numBranches, node->branchesIx
         );
+        return true;
     }
-    if ( node->numBranches != 0U ) {
-        for ( size_t i=0; i < node->numBranches; ++i ) {
-            output_impls_helper( node->branches[i] );
-        }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        if ( output_impls_helper( node->branches[i], id ) ) return true;
+    }
+    return false;
+}
+
+static void output_impls( void ) {
+    for ( int i=0; i < id; ++i ) {
+        output_impls_helper( tree, i );
     }
 }
 
@@ -814,13 +855,13 @@ static void output_code( void ) {
         "static const int branches[%d] = {\n"
         , branches_ix
     );
-    output_branches_helper( tree );
+    output_branches();
     printf( 
         "};\n\n"
         "static const parsingnode_t parsingTable[%d] = {\n"
         , id
     );
-    output_impls_helper( tree );
+    output_impls();
     printf( 
         "};\n\n"
     );
@@ -848,6 +889,7 @@ int main( int argc, char** argv ) {
     if ( printTree ) { dump_tree_node( prodlist, 0 ); return EXIT_SUCCESS; }
 
     tree = prodlist;
+    deduplicate_literals( &tree, tree );
     output_code();
 
     return EXIT_SUCCESS;
