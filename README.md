@@ -11,6 +11,10 @@ If you specify the "--tree" command line option, a syntax tree of the grammar de
 
 ## Release Notes
 
+### Enhancements
+
+In release 1.2.1, "speaking" names are attempted to be generated for terminals. 
+
 ### Bugfixes
 
 Please note that in release 1.0 and 1.1, the EBNF compiler didn't check your EBNF for validity. If you use an identifier that you haven't declared, output will contain something like:
