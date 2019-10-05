@@ -637,6 +637,72 @@ static bool is_export_node( treenode_t* node ) {
     return false;
 }
 
+static bool is_name( const char* text ) {
+    const char* p = text;
+    while ( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' ) || ( *p >= '0' && *p <= '9' ) || *p == '_' ) ++p;
+    if ( *p == '\0' ) return true;
+    return false;
+}
+
+static const char* name_to_label( const char* text ) {
+    static char buf[256];
+    snprintf( buf, sizeof(buf), "%s", text );
+    char* p = buf;
+    while ( *p != '\0' ) {
+        if ( *p >= 'a' && *p <= 'z' ) *p -= 'a'-'A';
+        ++p;
+    }
+    return buf;
+}
+
+typedef struct _op2label_t {
+    const char* op;
+    const char* label;
+} op2label_t;
+
+static const char* operator_to_label( const char* text ) {
+    static const op2label_t map[] = {
+        { "<>", "NE", }, { "!=", "CNE" }, { "==", "DEQ" }, { "=", "EQ" }, { ">=", "GE" }, { "<=", "LE" }, { "<", "LT" }, { ">", "GT" },
+        { "&", "AND" }, { "&&", "LOGAND" }, { "|", "OR" }, { "||", "LOGOR" }, { ";", "SEMIC" }, { ",", "COMMA" }, { ":", "COLON" },
+        { "(", "LPAREN" }, { ")", "RPAREN" }, { "[", "LBRACK" }, { "]", "RBRACK" }, { "{", "LBRACE" }, { "}", "RBRACE" }, { "^", "XOR" },
+        { "^^", "LOGXOR" }, { "*", "STAR" }, { "**", "DBLSTAR" }, { "/", "SLASH" }, { "+", "PLUS" }, { "-", "MINUS" },
+        { ":=", "ASSIGN" }, { "::=", "ASSIGN2" }, { "~=", "APPLY" }, { "++", "PLUSPLUS" }, { "--", "MINUSMINUS" }, { "+=", "PLUSEQ" },
+        { "-=", "MINUSEQ" }, { "*=", "STAREQ" }, { "/=", "SLASHEQ" }, { "&=", "ANDEQ" }, { "|=", "OREQ" }, { "^=", "XOREQ" },
+        { ".", "DOT" }, { "!", "EXCLAM" }, { "<<", "LSHIFT" }, { ">>", "RSHIFT" }, { "%", "MODULO" }, { "%=", "MODULOEQ" },
+        { "...", "ELLIPSIS" }, { "..", "RANGE" }, { 0, 0 }
+    };
+    for ( int i=0; map[i].op; ++i ) {
+        if ( strcmp( map[i].op, text ) == 0 ) return map[i].label;
+    }
+    return 0;
+}
+
+typedef struct _havelabel_t {
+    struct _havelabel_t* next;
+    char*                text;
+} havelabel_t;
+
+static havelabel_t* havelabel_first = 0;
+static havelabel_t* havelabel_last  = 0;
+
+static bool check_have_label( const char* text ) {
+    havelabel_t* lab = havelabel_first;
+    while ( lab ) {
+        if ( strcmp( lab->text, text ) == 0 ) return true;
+        lab = lab->next;
+    }
+    lab = (havelabel_t*) xmalloc( sizeof(havelabel_t) );
+    lab->next = 0;
+    lab->text = xstrdup( text );
+    if ( havelabel_first == 0 ) {
+        havelabel_first = havelabel_last = lab;
+    } else {
+        havelabel_last->next = lab;
+        havelabel_last       = lab;
+    }
+    return false;
+}
+
 static int id = 0;
 
 static void output_enums_helper( treenode_t* node ) {
@@ -646,7 +712,17 @@ static void output_enums_helper( treenode_t* node ) {
         if ( node->token == T_PRODUCTION ) {
             name_to_C_enum( tmp, node->text );
         } else if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
-            snprintf( tmp, 256U, "NT_TERMINAL_%d", id );
+            const char* text = 0;
+            if ( is_name( node->text ) ) {
+                text = name_to_label( node->text );
+                snprintf( tmp, 256U, "NT_TERMINAL_%s", text );
+                if ( check_have_label( tmp ) ) print = false;
+            } else if ( ( text = operator_to_label( node->text ) ) ) {
+                snprintf( tmp, 256U, "NT_TERMINAL_%s", text );
+                if ( check_have_label( tmp ) ) print = false;
+            } else {
+                snprintf( tmp, 256U, "NT_TERMINAL_%d", id );
+            }
         } else {
             snprintf( tmp, 256U, "%s", "_NT_GENERIC" );
             print = false;
