@@ -32,36 +32,49 @@ the original language as far as I can remember it.
 Whitespace does not have to be specified, unless the lexical analyzer that 
 you plan to use does not support automatic whitespace elimination.
 
-The syntax of this EBNF, written in itself, is as follows (whitespace omitted):
+The syntax of this EBNF, written in itself, is as follows (whitespace is
+handled automatically):
 
-identifier  := /[a-z0-9-]+/ .
-str-literal := /'[^']+'/ | /"[^"]+"/ .
+WHITESPACE  := /[ \t\n]+/ .
+
+TOKEN identifier  := /[a-z0-9-]+/ .
+TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of regular expressions, whitespace skipping will be disabled
-re-any      := '.' .
-re-chr      := '\' /./ | /[^\/.*?[(|]/ .
+TOKEN-ELEMENT re-any         := '.' .
+TOKEN-ELEMENT re-chr         := '\' /./ | /[^\/.*?[(|]/ .
+TOKEN-ELEMENT re-cc-chr      := '\' /./ | /[^\\\]]/ .
+TOKEN-ELEMENT re-cc-rng      := re-cc-chr '-' re-cc-chr .
+TOKEN-ELEMENT re-cc-item     := re-cc-rng | re-cc-chr .
+TOKEN-ELEMENT re-cc-items    := re-cc-item { re-cc-item } .
+TOKEN-ELEMENT re-cc          := '[' [ '^' ] re-cc-items ']' .
+TOKEN-ELEMENT re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
+TOKEN-ELEMENT re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
+TOKEN-ELEMENT re-and-expr    := re-repeat-expr { re-repeat-expr } .
+TOKEN-ELEMENT re-or-expr     := re-and-expr { '|' re-and-expr } .
+TOKEN         re-expr        := re-or-expr .
 
-re-cc-chr   := '\' /./ | /[^\\\]]/ .
-re-cc-rng   := re-cc-chr '-' re-cc-chr .
-re-cc-item  := re-cc-rng | re-cc-chr .
-re-cc-items := re-cc-item { re-cc-item } .
-re-cc       := '[' [ '^' ] re-cc-items ']' .
+NAMED-TOKEN   lparen         := '(' .
+NAMED-TOKEN   rparen         := ')' .
+NAMED-TOKEN   lbracket       := '[' .
+NAMED-TOKEN   rbracket       := ']' .
+NAMED-TOKEN   lbrace         := '{' .
+NAMED-TOKEN   rbrace         := '}' .
+NAMED-TOKEN   column         := '|' .
+NAMED-TOKEN   dot            := '.' .
+NAMED-TOKEN   whitespace     := 'WHITESPACE' .
+NAMED-TOKEN   token-element  := 'TOKEN-ELEMENT' .
+NAMED-TOKEN   named-token    := 'NAMED-TOKEN' .
+NAMED-TOKEN   token          := 'TOKEN' .
+NAMED-TOKEN   root           := 'ROOT' .
 
-re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
-re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
-re-and-expr    := re-repeat-expr { re-repeat-expr } .
-re-or-expr     := re-and-expr { '|' re-and-expr } .
-re-expr        := re-or-expr .
-
-base-expr   := identifier | str-literal | re-expr | '(' expr ')' | '[' expr ']' | '{' expr '}' .
-and-expr    := base-expr { base-expr } .
+base-expr   := identifier | str-literal | re-expr | '(' expr ')' [ '+' ] | '[' expr ']' | '{' expr '}' .
+and-expr    := ( base-expr )+ .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
-production  := identifier ':=' expr '.' .
-prod-list   := production { production } .
-
-
-
-
-
+whitespace-prod  := "WHITESPACE" ':=' expr '.' .
+prod-qualifier   := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
+regular-prod     := [ prod-qualifier ] identifier ':=' expr '.' .
+production       := whitespace-prod | regular-prod .
+ROOT prod-list   := ( production )+ .
