@@ -36,16 +36,16 @@ The syntax of this EBNF, written in itself, is as follows (whitespace is
 handled automatically):
 
 WHITESPACE  := /[ \t\n]+/ .
+COMMENT     := /--[^\n]+\n/ .
 
 TOKEN identifier  := /[a-z0-9-]+/ .
 TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
--- during parsing of regular expressions, whitespace skipping will be disabled
+-- during parsing of token elements, whitespace and comment skipping will be disabled
 TOKEN-ELEMENT re-any         := '.' .
 TOKEN-ELEMENT re-chr         := '\' /./ | /[^\/.*?[(|]/ .
 TOKEN-ELEMENT re-cc-chr      := '\' /./ | /[^\\\]]/ .
-TOKEN-ELEMENT re-cc-rng      := re-cc-chr '-' re-cc-chr .
-TOKEN-ELEMENT re-cc-item     := re-cc-rng | re-cc-chr .
+TOKEN-ELEMENT re-cc-item     := re-cc-chr [ '-' re-cc-chr ] .
 TOKEN-ELEMENT re-cc-items    := re-cc-item { re-cc-item } .
 TOKEN-ELEMENT re-cc          := '[' [ '^' ] re-cc-items ']' .
 TOKEN-ELEMENT re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
