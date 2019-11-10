@@ -42,17 +42,10 @@ TOKEN identifier  := /[a-z0-9-]+/ .
 TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of token elements, whitespace and comment skipping will be disabled
-TOKEN-ELEMENT re-any         := '.' .
-TOKEN-ELEMENT re-chr         := '\' /./ | /[^\/.*?[(|]/ .
-TOKEN-ELEMENT re-cc-chr      := '\' /./ | /[^\\\]]/ .
-TOKEN-ELEMENT re-cc-item     := re-cc-chr [ '-' re-cc-chr ] .
-TOKEN-ELEMENT re-cc-items    := re-cc-item { re-cc-item } .
-TOKEN-ELEMENT re-cc          := '[' [ '^' ] re-cc-items ']' .
-TOKEN-ELEMENT re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
-TOKEN-ELEMENT re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
-TOKEN-ELEMENT re-and-expr    := re-repeat-expr { re-repeat-expr } .
-TOKEN-ELEMENT re-or-expr     := re-and-expr { '|' re-and-expr } .
-TOKEN         re-expr        := re-or-expr .
+-- regular expressions are not interpreted (anymore) but passed through to the outer layer
+
+TOKEN-ELEMENT re-def-chr     := '\/' | /[^\/]+/ .
+TOKEN         re-expr        := '/' ( ( re-def-chr )+ '/' )! .
 
 NAMED-TOKEN   lparen         := '(' .
 NAMED-TOKEN   rparen         := ')' .
@@ -62,6 +55,7 @@ NAMED-TOKEN   lbrace         := '{' .
 NAMED-TOKEN   rbrace         := '}' .
 NAMED-TOKEN   column         := '|' .
 NAMED-TOKEN   dot            := '.' .
+NAMED-TOKEN   fail           := '!' .
 NAMED-TOKEN   whitespace     := 'WHITESPACE' .
 NAMED-TOKEN   comment        := 'COMMENT' .
 NAMED-TOKEN   token-element  := 'TOKEN-ELEMENT' .
@@ -69,13 +63,20 @@ NAMED-TOKEN   named-token    := 'NAMED-TOKEN' .
 NAMED-TOKEN   token          := 'TOKEN' .
 NAMED-TOKEN   root           := 'ROOT' .
 
+-- regular productions usually fail silently if they do not match, potentially causing
+-- another production in the syntax tree to be tried. to signify failure upon failure to
+-- match, '!' can be used in postfix notation.
+
 base-expr   := identifier | str-literal | re-expr | '(' expr ')' [ '+' ] | '[' expr ']' | '{' expr '}' .
+fail-expr   := base-expr [ '!' ] .
 and-expr    := ( base-expr )+ .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
-whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) ':=' expr '.' .
+prod-specifier   := ':=' expr '.' .
+whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) ( identifier prod-specifier )! .
 prod-qualifier   := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
-regular-prod     := [ prod-qualifier ] identifier ':=' expr '.' .
-production       := whitespace-prod | regular-prod .
+qualified-prod   := prod-qualifier ( identifier prod-specifier )! .
+regular-prod     := identifier prod-specifier! .
+production       := whitespace-prod | qualified-prod | regular-prod .
 ROOT prod-list   := ( production )+ .
