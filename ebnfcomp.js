@@ -24,4 +24,42 @@
 
 // TBD
 
-console.log( 'hello world' );
+var inputFile;
+
+function processCmdLine() {
+    process.argv.forEach( ( val, index ) => {
+        let valOrig = val;
+        if ( index >= 2 ) {
+            let opt = false;
+            if ( val[0] == '-' && val[1] == '-' ) {
+                val = val.substr( 2 );
+                opt = true;
+            } else if ( val[0] == '-' ) {
+                val = val.substr( 1 );
+                opt = true;
+            }
+            if ( opt ) {
+                console.error( '? unknown option: ' + valOrig );
+                process.exit( 1 );
+            } else if ( inputFile === undefined ) {
+                inputFile = val;
+            } else {
+                console.error( '? too many args: ' + val );
+                process.exit( 1 );
+            }
+        }
+    });
+}
+
+function main() {
+
+    processCmdLine();
+    if ( inputFile === undefined ) {
+        console.error( '? missing input file' );
+        process.exit( 1 );
+    }
+
+    console.log( 'input file = ' + inputFile );
+}
+
+main();
