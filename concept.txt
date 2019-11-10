@@ -1,5 +1,5 @@
 
-    EBNF Compiler
+    EBNF Compiler and Parser Generator
     Copyright (C) 2019  Ekkehard Morgenstern
 
     This program is free software: you can redistribute it and/or modify
@@ -19,21 +19,35 @@
     E-Mail: ekkehard@ekkehardmorgenstern.de 
     Mail: Ekkehard Morgenstern, Mozartstr. 1, 76744 Woerth am Rhein, Germany, Europe
 
-EBNF Compiler
--------------
+EBNF Compiler and Parser Generator
+----------------------------------
 
 This compiler translates a variant of the Extended Backus-Naur-Form (EBNF) 
 (originally developed by Dr. Niklaus Wirth of ETH Zurich university)
-into a form suitable to create syntax analyzers and parsers.
+into a parser written in one of several languages (currently planned are C and JavaScript).
 
-I added a regular expression feature, but otherwise it is very similar to
-the original language as far as I can remember it.
+I added the following features, but otherwise it is very similar to
+the original EBNF language as far as I can remember it:
+- regular expressions: Now they're simply passed on, and the syntax doesn't attempt to 
+  verify or interpret it. This allows for freedom in the choice of generated parser languages.
+- new: WHITESPACE and COMMENT production: This allows for easy specification of those.
+  When present, the generated parser generator will automatically skip these before parsing 
+  any terminal (i.e. token).
+- new: TOKEN, TOKEN-ELEMENT and NAMED-TOKEN qualifiers: Allows to explicitly specify which
+  production forms a TOKEN, part of a TOKEN or a named token. Named tokens permit to specify
+  a production name for symbols that would otherwise go unnamed. This releaves me (or you)
+  from providing those in the parser itself.
+- new: a mandatory repetitive expression: writing "( expr )+" now signifies a mandatory repetitive
+  expression and can be used instead of the form "expr { expr }", which would otherwise have
+  to be used.
+- new: an error hint: writing '!' after expressions now specifies that this expression must match,
+  otherwise the compilation will fail. This is very useful for automated error handling.
 
-Whitespace does not have to be specified, unless the lexical analyzer that 
-you plan to use does not support automatic whitespace elimination.
+Things left to do:
+- Currently, there is no way to specify code. Have to find a way to patch in user-defined code.
+  For now, the generated parser will only generate a syntax tree from its input, and nothing more.
 
-The syntax of this EBNF, written in itself, is as follows (whitespace is
-handled automatically):
+The syntax of this EBNF, written in itself, is as follows:
 
 WHITESPACE  := /[ \t\n]+/ .
 COMMENT     := /--[^\n]+\n/ .
