@@ -24,7 +24,8 @@ EBNF Compiler and Parser Generator
 
 This compiler translates a variant of the Extended Backus-Naur-Form (EBNF) 
 (originally developed by Dr. Niklaus Wirth of ETH Zurich university)
-into a parser written in one of several languages (currently planned are C and JavaScript).
+into a parser written in one of several languages (currently planned are C and/or C++
+and JavaScript).
 
 I added the following features, but otherwise it is very similar to
 the original EBNF language as far as I can remember it:
@@ -49,7 +50,7 @@ Things left to do:
 
 The syntax of this EBNF, written in itself, is as follows:
 
-WHITESPACE  := /[ \t\n]+/ .
+WHITESPACE  := /[ \t\r\n]+/ .
 COMMENT     := /--[^\n]+\n/ .
 
 TOKEN identifier  := /[a-z0-9-]+/ .
@@ -58,6 +59,8 @@ TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 -- during parsing of token elements, whitespace and comment skipping will be disabled
 -- regular expressions are not interpreted (anymore) but passed through to the outer layer
 
+NAMED-TOKEN   esc-slash      := '\/' .
+NAMED-TOKEN   slash          := '/' .
 TOKEN-ELEMENT re-def-chr     := '\/' | /[^\/]+/ .
 TOKEN         re-expr        := '/' ( ( re-def-chr )+ '/' )! .
 

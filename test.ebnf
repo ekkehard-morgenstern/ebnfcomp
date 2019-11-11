@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------------------
---    EBNF Compiler                                                                       --
+--    EBNF Compiler and Parser Generator                                                  --
 --    Copyright (C) 2019  Ekkehard Morgenstern                                            --
 --                                                                                        --
 --    This program is free software: you can redistribute it and/or modify                --
@@ -20,30 +20,50 @@
 --    Mail: Ekkehard Morgenstern, Mozartstr. 1, 76744 Woerth am Rhein, Germany, Europe    --
 --------------------------------------------------------------------------------------------
 
-identifier  := /[a-z0-9-]+/ .
-str-literal := /'[^']+'/ | /"[^"]+"/ .
+WHITESPACE  := /[ \t\r\n]+/ .
+COMMENT     := /--[^\n]+\n/ .
 
--- during parsing of regular expressions, whitespace skipping will be disabled
-re-any      := '.' .
-re-chr      := '\' /./ | /[^\/.*?[(|]/ .
+TOKEN identifier  := /[a-z0-9-]+/ .
+TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
-re-cc-chr   := '\' /./ | /[^\\\]]/ .
-re-cc-rng   := re-cc-chr '-' re-cc-chr .
-re-cc-item  := re-cc-rng | re-cc-chr .
-re-cc-items := re-cc-item { re-cc-item } .
-re-cc       := '[' [ '^' ] re-cc-items ']' .
+-- during parsing of token elements, whitespace and comment skipping will be disabled
+-- regular expressions are not interpreted (anymore) but passed through to the outer layer
 
-re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
-re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
-re-and-expr    := re-repeat-expr { re-repeat-expr } .
-re-or-expr     := re-and-expr { '|' re-and-expr } .
-re-expr        := re-or-expr .
+NAMED-TOKEN   esc-slash      := '\/' .
+NAMED-TOKEN   slash          := '/' .
+TOKEN-ELEMENT re-def-chr     := '\/' | /[^\/]+/ .
+TOKEN         re-expr        := '/' ( ( re-def-chr )+ '/' )! .
 
-base-expr   := identifier | str-literal | re-expr | '(' expr ')' | '[' expr ']' | '{' expr '}' .
-and-expr    := base-expr { base-expr } .
+NAMED-TOKEN   lparen         := '(' .
+NAMED-TOKEN   rparen         := ')' .
+NAMED-TOKEN   lbracket       := '[' .
+NAMED-TOKEN   rbracket       := ']' .
+NAMED-TOKEN   lbrace         := '{' .
+NAMED-TOKEN   rbrace         := '}' .
+NAMED-TOKEN   column         := '|' .
+NAMED-TOKEN   dot            := '.' .
+NAMED-TOKEN   fail           := '!' .
+NAMED-TOKEN   whitespace     := 'WHITESPACE' .
+NAMED-TOKEN   comment        := 'COMMENT' .
+NAMED-TOKEN   token-element  := 'TOKEN-ELEMENT' .
+NAMED-TOKEN   named-token    := 'NAMED-TOKEN' .
+NAMED-TOKEN   token          := 'TOKEN' .
+NAMED-TOKEN   root           := 'ROOT' .
+
+-- regular productions usually fail silently if they do not match, potentially causing
+-- another production in the syntax tree to be tried. to signify failure upon failure to
+-- match, '!' can be used in postfix notation.
+
+base-expr   := identifier | str-literal | re-expr | '(' expr ')' [ '+' ] | '[' expr ']' | '{' expr '}' .
+fail-expr   := base-expr [ '!' ] .
+and-expr    := ( base-expr )+ .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
-production  := identifier ':=' expr '.' .
-prod-list   := production { production } .
-
+prod-specifier   := ':=' expr '.' .
+whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) ( identifier prod-specifier )! .
+prod-qualifier   := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
+qualified-prod   := prod-qualifier ( identifier prod-specifier )! .
+regular-prod     := identifier prod-specifier! .
+production       := whitespace-prod | qualified-prod | regular-prod .
+ROOT prod-list   := ( production )+ .

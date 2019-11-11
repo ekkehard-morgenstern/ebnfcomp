@@ -24,29 +24,52 @@
 
 // TBD
 
-var inputFile;
+var inputFile;  // name of file to be read
+
+function processInput() {
+
+
+}
+
+function help() {
+    console.log( 'Usage: ' + process.argv[0] + ' ' + process.argv[1] + ' [options] inputfile' );
+    console.log( 'Options:' );
+    console.log( '  --help, -h, -?      (this)' );
+}
 
 function processCmdLine() {
-    process.argv.forEach( ( val, index ) => {
-        let valOrig = val;
-        if ( index >= 2 ) {
-            let opt = false;
-            if ( val[0] == '-' && val[1] == '-' ) {
-                val = val.substr( 2 );
-                opt = true;
-            } else if ( val[0] == '-' ) {
-                val = val.substr( 1 );
-                opt = true;
+
+    process.argv.forEach( ( value, index ) => {        
+    
+        let originalValue = value;
+    
+        if ( index >= 2 ) { // parameters start at index 2
+    
+            let option = false;
+
+            if ( value[0] == '-' && value[1] == '-' ) { // double-dash option
+                value = value.substr( 2 );
+                option = true;
+            } else if ( value[0] == '-' ) { // single-dash option
+                value = value.substr( 1 );
+                option = true;
             }
-            if ( opt ) {
-                console.error( '? unknown option: ' + valOrig );
-                process.exit( 1 );
-            } else if ( inputFile === undefined ) {
-                inputFile = val;
-            } else {
-                console.error( '? too many args: ' + val );
+
+            if ( option ) { // command-line option
+                if ( value == 'help' || value == 'h' || value == '?' ) {
+                    help();
+                    process.exit( 1 );                   
+                } else {
+                    console.error( '? unknown option: ' + originalValue );
+                    process.exit( 1 );                                  
+                }
+            } else if ( inputFile === undefined ) { // first non-option argument: input file
+                inputFile = value;
+            } else {    // too many arguments
+                console.error( '? too many args: ' + value );
                 process.exit( 1 );
             }
+
         }
     });
 }
@@ -60,6 +83,8 @@ function main() {
     }
 
     console.log( 'input file = ' + inputFile );
+
+    processInput();
 }
 
 main();
