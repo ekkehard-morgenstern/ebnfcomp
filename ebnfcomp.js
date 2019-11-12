@@ -24,11 +24,111 @@
 
 // TBD
 
-var inputFile;  // name of file to be read
+// modules we're dependent on
+var fs = require( 'fs' );
+
+// regular expressions
+var regexWHITESPACE = /^[ \t\r\n]+/;
+var regexCOMMENT    = /^--[^\n]+\n/;
+var regexIdentifier = /^[a-z0-9-]+/;
+var regexStrLiteral = /^('[^']+'|"[^"]+")/;
+var regexReExpr     = /^\/(\\\/|[^\\/]+)+\//;
+
+// token symbols
+const T_EOF        = 0;
+const T_IDENTIFIER = 1;
+const T_STRLITERAL = 2;
+const T_REEXPR     = 3;
+const T_LPAREN     = 4;
+const T_RPAREN     = 5;
+const T_LBRACKET   = 6;
+const T_RBRACKET   = 7;
+const T_LBRACE     = 8;
+const T_RBRACE     = 9;
+const T_COLUMN     = 10;
+const T_DOT        = 11;
+const T_FAIL       = 12;
+
+// other global variables
+var inputFile;          // name of file to be read
+var inputData;          // data of input file
+var currentToken;       // the token we're currently at
+var currentTokenText;   // the text of that token
+
+function eatChar() {
+    inputData = inputData.substr( 1 );
+}
+
+function eatMatch( match ) {
+    let eaten = match[0];
+    inputData = inputData.substr( match[0].length );
+    return eaten;
+}
+
+function nextToken() {
+    currentTokenText = undefined;
+    for (;;) {
+        
+        // at end of file
+        if ( inputData.length == 0 ) { currentToken = T_EOF; return; }
+        
+        // eat whitespace
+        let match = regexWHITESPACE.exec( inputData );
+        if ( match !== null ) { eatMatch( match ); continue; }
+        
+        // eat comment
+        match = regexCOMMENT.exec( inputData );
+        if ( match !== null ) { eatMatch( match ); continue; }
+
+        // eat identifier
+        match = regexIdentifier.exec( inputData );
+        if ( match !== null ) { 
+            currentTokenText = eatMatch( match );
+            currentToken     = T_IDENTIFIER;
+            return;
+        }
+
+        // eat string literal
+        match = regexStrLiteral.exec( inputData );
+        if ( match !== null ) { 
+            currentTokenText = eatMatch( match );
+            currentToken     = T_STRLITERAL;
+            return;
+        }
+
+        // eat regular expression definition
+        match = regexReExpr.exec( inputData );
+        if ( match !== null ) { 
+            currentTokenText = eatMatch( match );
+            currentToken     = T_REEXPR;
+            return;
+        }
+
+        // examine the current character
+        let ch = inputData[0];
+        if ( ch == '(' ) { eatChar(); currentToken = T_LPAREN; return; }
+        if ( ch == ')' ) { eatChar(); currentToken = T_RPAREN; return; }
+        if ( ch == '[' ) { eatChar(); currentToken = T_LBRACKET; return; }
+        if ( ch == ']' ) { eatChar(); currentToken = T_RBRACKET; return; }
+        if ( ch == '{' ) { eatChar(); currentToken = T_LBRACE; return; }
+        if ( ch == '}' ) { eatChar(); currentToken = T_RBRACE; return; }
+        if ( ch == '|' ) { eatChar(); currentToken = T_COLUMN; return; }
+        if ( ch == '.' ) { eatChar(); currentToken = T_DOT; return; }
+        if ( ch == '!' ) { eatChar(); currentToken = T_FAIL; return; }
+
+        // syntax error
+        console.log( '? syntax error at "' + inputData.substr( 0, 16 ) + '"' );
+        process.exit( 1 );
+    }
+}
 
 function processInput() {
+    inputData = fs.readFileSync( inputFile, 'utf8' );
 
+    // read first token
+    nextToken();
 
+    // ...
 }
 
 function help() {
