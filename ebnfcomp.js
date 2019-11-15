@@ -33,27 +33,35 @@ var regexCOMMENT    = /^--[^\n]+\n/;
 var regexIdentifier = /^[a-z0-9-]+/;
 var regexStrLiteral = /^('[^']+'|"[^"]+")/;
 var regexReExpr     = /^\/(\\\/|[^\\/]+)+\//;
+var regexKeyword    = /^[A-Z-]+/;
 
 // token symbols
-const T_EOF        = 0;
-const T_IDENTIFIER = 1;
-const T_STRLITERAL = 2;
-const T_REEXPR     = 3;
-const T_LPAREN     = 4;
-const T_RPAREN     = 5;
-const T_LBRACKET   = 6;
-const T_RBRACKET   = 7;
-const T_LBRACE     = 8;
-const T_RBRACE     = 9;
-const T_COLUMN     = 10;
-const T_DOT        = 11;
-const T_FAIL       = 12;
+const T_EOF           = 0;
+const T_IDENTIFIER    = 1;
+const T_STRLITERAL    = 2;
+const T_REEXPR        = 3;
+const T_LPAREN        = 4;
+const T_RPAREN        = 5;
+const T_LBRACKET      = 6;
+const T_RBRACKET      = 7;
+const T_LBRACE        = 8;
+const T_RBRACE        = 9;
+const T_COLUMN        = 10;
+const T_DOT           = 11;
+const T_FAIL          = 12;
+const T_WHITESPACE    = 13;
+const T_COMMENT       = 14;
+const T_TOKEN_ELEMENT = 15;
+const T_NAMED_TOKEN   = 16;
+const T_TOKEN         = 17;
+const T_ROOT          = 18;
 
 // other global variables
 var inputFile;          // name of file to be read
 var inputData;          // data of input file
 var currentToken;       // the token we're currently at
 var currentTokenText;   // the text of that token
+var currentLine;        // current line number
 
 function eatChar() {
     inputData = inputData.substr( 1 );
@@ -61,6 +69,10 @@ function eatChar() {
 
 function eatMatch( match ) {
     let eaten = match[0];
+    for ( let pos=0; pos >= 0; ) {
+        pos = eaten.indexOf( "\n", pos );
+        if ( pos >= 0 ) { ++pos; ++currentLine; }
+    }
     inputData = inputData.substr( match[0].length );
     return eaten;
 }
@@ -86,6 +98,22 @@ function nextToken() {
             currentTokenText = eatMatch( match );
             currentToken     = T_IDENTIFIER;
             return;
+        }
+
+        // eat keyword
+        match = regexKeyword.exec( inputData );
+        if ( match !== null ) {
+            let keyword = match[0];
+            let newtok  = -1;
+            switch ( keyword ) {
+                case 'WHITESPACE'   : newtok = T_WHITESPACE   ; break;
+                case 'COMMENT'      : newtok = T_COMMENT      ; break;
+                case 'TOKEN-ELEMENT': newtok = T_TOKEN_ELEMENT; break;
+                case 'NAMED-TOKEN'  : newtok = T_NAMED_TOKEN  ; break;
+                case 'TOKEN'        : newtok = T_TOKEN        ; break;
+                case 'ROOT'         : newtok = T_ROOT         ; break;
+            }
+            if ( newtok >= 0 ) { eatMatch( match ); currentToken = newtok; return; }
         }
 
         // eat string literal
@@ -117,13 +145,15 @@ function nextToken() {
         if ( ch == '!' ) { eatChar(); currentToken = T_FAIL; return; }
 
         // syntax error
-        console.log( '? syntax error at "' + inputData.substr( 0, 16 ) + '"' );
+        console.log( '? syntax error in line ' + currentLine + ' at "' + 
+            inputData.substr( 0, 16 ) + '"' );
         process.exit( 1 );
     }
 }
 
 function processInput() {
-    inputData = fs.readFileSync( inputFile, 'utf8' );
+    inputData   = fs.readFileSync( inputFile, 'utf8' );
+    currentLine = 1;
 
     // read first token
     nextToken();
