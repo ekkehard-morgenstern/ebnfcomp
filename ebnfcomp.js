@@ -63,6 +63,86 @@ var currentToken;       // the token we're currently at
 var currentTokenText;   // the text of that token
 var currentLine;        // current line number
 
+// classes
+
+class TreeNode {
+
+    constructor( nodeType, nodeText = null ) {
+        this.nodeType = nodeType; 
+        this.nodeText = nodeText;
+        this.branches = new Array();
+    }
+
+    get nodeTypeAsInt() {
+        return this.nodeType;
+    }
+
+    get nodeTypeAsString() {
+        let s = '';
+        switch ( this.nodeType ) {
+            case T_EOF           : s = 'T_EOF'          ; break;
+            case T_IDENTIFIER    : s = 'T_IDENTIFIER'   ; break;
+            case T_STRLITERAL    : s = 'T_STRLITERAL'   ; break;
+            case T_REEXPR        : s = 'T_REEXPR'       ; break;
+            case T_LPAREN        : s = 'T_LPAREN'       ; break;
+            case T_RPAREN        : s = 'T_RPAREN'       ; break;
+            case T_LBRACKET      : s = 'T_LBRACKET'     ; break;
+            case T_RBRACKET      : s = 'T_RBRACKET'     ; break;
+            case T_LBRACE        : s = 'T_LBRACE'       ; break;
+            case T_RBRACE        : s = 'T_RBRACE'       ; break;
+            case T_COLUMN        : s = 'T_COLUMN'       ; break;
+            case T_DOT           : s = 'T_DOT'          ; break;
+            case T_FAIL          : s = 'T_FAIL'         ; break;
+            case T_WHITESPACE    : s = 'T_WHITESPACE'   ; break;
+            case T_COMMENT       : s = 'T_COMMENT'      ; break;
+            case T_TOKEN_ELEMENT : s = 'T_TOKEN_ELEMENT'; break;
+            case T_NAMED_TOKEN   : s = 'T_NAMED_TOKEN'  ; break;
+            case T_TOKEN         : s = 'T_TOKEN'        ; break;
+            case T_ROOT          : s = 'T_ROOT'         ; break;            
+        }
+        return s;
+    }
+
+    get numBranches() {
+        return this.branches.length;
+    }
+
+    addBranch( branch ) {
+        this.branches.push( branch );
+    }
+
+    recurseWith( fn, depth = 0, before = false ) {
+        let cont = true;
+        if ( before ) {
+            this.branches.forEach( element => {
+                cont = element.recurseWith( fn, depth+1, before );
+                if ( !cont ) return false;
+            })    
+        }
+        cont = fn( this, depth );
+        if ( !cont ) return false;
+        if ( !before ) {
+            this.branches.forEach( element => {
+                cont = element.recurseWith( fn, depth+1, before );
+                if ( !cont ) return false;
+            })    
+        }
+        return cont;
+    }
+
+    print( indent ) {
+        this.recurseWith( ( node, depth ) => {
+
+            console.log( );
+
+
+        });
+    }
+
+}
+
+// main functions
+
 function eatChar() {
     inputData = inputData.substr( 1 );
 }
