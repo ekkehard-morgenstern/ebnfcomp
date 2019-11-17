@@ -55,6 +55,10 @@ const T_TOKEN_ELEMENT = 15;
 const T_NAMED_TOKEN   = 16;
 const T_TOKEN         = 17;
 const T_ROOT          = 18;
+const T_AND           = 19;
+const T_ASSIGN        = 20;
+const T_REGULAR       = 21;
+const T_PROD_LIST     = 22;
 
 // other global variables
 var inputFile;          // name of file to be read
@@ -62,6 +66,7 @@ var inputData;          // data of input file
 var currentToken;       // the token we're currently at
 var currentTokenText;   // the text of that token
 var currentLine;        // current line number
+var prodList;           // production list (syntax analysis result)
 
 // classes
 
@@ -98,7 +103,10 @@ class TreeNode {
             case T_TOKEN_ELEMENT : s = 'T_TOKEN_ELEMENT'; break;
             case T_NAMED_TOKEN   : s = 'T_NAMED_TOKEN'  ; break;
             case T_TOKEN         : s = 'T_TOKEN'        ; break;
-            case T_ROOT          : s = 'T_ROOT'         ; break;            
+            case T_ROOT          : s = 'T_ROOT'         ; break;
+            case T_AND           : s = 'T_AND'          ; break;
+            case T_ASSIGN        : s = 'T_ASSIGN'       ; break;
+            case T_PROD_LIST     : s = 'T_PROD_LIST'    ; break;
         }
         return s;
     }
@@ -159,6 +167,12 @@ function eatMatch( match ) {
     }
     inputData = inputData.substr( match[0].length );
     return eaten;
+}
+
+function syntaxError() {
+    console.log( '? syntax error in line ' + currentLine + ' at "' + 
+        inputData.substr( 0, 16 ) + '"' );
+    process.exit( 1 );
 }
 
 function nextToken() {
@@ -228,10 +242,180 @@ function nextToken() {
         if ( ch == '.' ) { eatChar(); currentToken = T_DOT; return; }
         if ( ch == '!' ) { eatChar(); currentToken = T_FAIL; return; }
 
+        // special cases
+        if ( inputData.startsWith( ':=' ) ) {
+            eatChar(); eatChar(); currentToken = T_ASSIGN;
+            return;
+        }
+
         // syntax error
-        console.log( '? syntax error in line ' + currentLine + ' at "' + 
-            inputData.substr( 0, 16 ) + '"' );
-        process.exit( 1 );
+        syntaxError();
+    }
+}
+
+function eatBaseExpr() {
+    // base-expr := identifier | str-literal | re-expr | '(' expr ')' [ '+' ]
+    //              | '[' expr ']' | '{' expr '}' .
+    let node = null; let introducer = null; let expr = null;
+    switch ( currentToken ) {
+        case T_IDENTIFIER: case T_STRLITERAL: case T_REEXPR:
+            node = new TreeNode( currentToken, currentTokenText );
+            nextToken();
+            break;
+        case T_LPAREN: case T_LBRACKET: case T_LBRACE:
+            introducer = currentToken;
+            nextToken();
+            expr = eatExpr();
+            if ( expr === null ) syntaxError();
+            if ( currentToken != introducer + 1 ) syntaxError();
+            nextToken();
+            node = new TreeNode( introducer );
+            node.addBranch( expr );
+            if ( introducer == T_LPAREN && currentToken == T_PLUS ) {
+                nextToken();
+                node.addBranch( new TreeNode( T_PLUS ) );
+            }
+            break;
+    }
+    return node;
+}
+
+function eatFailExpr() {
+    // fail-expr := base-expr [ '!' ] .
+    let expr = eatBaseExpr();
+    if ( expr === null ) return null;
+    if ( currentToken == T_FAIL ) {
+        nextToken();
+        let fail = new TreeNode( T_FAIL );
+        fail.addBranch( expr );
+        return fail;
+    }
+    return expr;
+}
+
+function eatAndExpr() {
+    // and-expr := ( fail-expr )+ .
+    let node = null;
+    for (;;) {
+        let expr = eatFailExpr();
+        if ( expr === null ) {
+            if ( node === null ) return null;
+            if ( node.numBranches == 1 ) return node.branches[0];
+            return node;
+        }
+        if ( node === null ) node = new TreeNode( T_AND );
+        node.addBranch( expr );
+    }
+}
+
+function eatOrExpr() {
+    // or-expr := and-expr { '|' and-expr } .
+    let node = null;
+    for (;;) {
+        if ( node !== null ) {
+            if ( currentToken != T_COLUMN ) {
+                if ( node.numBranches == 1 ) return node.branches[0];
+                return node;
+            }
+            nextToken();
+        }
+        let expr = eatAndExpr();
+        if ( expr === null ) {
+            if ( node === null ) return null;
+            syntaxError();
+        }
+        if ( node === null ) node = new TreeNode( T_COLUMN );
+        node.addBranch( expr );
+    }
+}
+
+function eatExpr() {
+    // expr := or-expr .
+    return eatOrExpr();
+}
+
+function eatProdSpecifier() {
+    // prod-specifier := ':=' expr '.' .
+    if ( currentToken != T_ASSIGN ) return null;
+    nextToken();
+    let expr = eatExpr();
+    if ( expr === null ) syntaxError();
+    if ( currentToken != T_DOT ) syntaxError();
+    nextToken();
+    return expr;
+}
+
+function eatWhitespaceProd() {
+    // whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) prod-specifier! .
+    if ( currentToken != T_WHITESPACE && currentToken != T_COMMENT ) {
+        return null;
+    }
+    let introducer = currentToken;
+    nextToken();
+    let specifier = eatProdSpecifier();
+    if ( specifier === null ) syntaxError();
+    let node = new TreeNode( introducer );
+    node.addBranch( specifier );
+    return node;
+}
+
+function eatProdQualifier() {
+    // prod-qualifier := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
+    switch ( currentToken ) {
+        case T_TOKEN_ELEMENT: case T_NAMED_TOKEN: case T_TOKEN: case T_ROOT:
+            let node = new TreeNode( currenToken );
+            nextToken();
+            return node;
+    }
+    return null;
+}
+
+function eatQualifiedProd() {
+    // qualified-prod := prod-qualifier ( identifier prod-specifier )! .
+    let qualifier = eatProdQualifier();
+    if ( qualifier === null ) return null;
+    if ( currentToken != T_IDENTIFIER ) syntaxError();
+    let identifier = currentTokenText;
+    nextToken();
+    let specifier = eatProdSpecifier();
+    if ( specifier === null ) syntaxError();
+    let node = qualifier;
+    node.nodeText = identifier;
+    node.addBranch( specifier );
+    return node;
+}
+
+function eatRegularProd() {
+    // regular-prod := identifier prod-specifier! .
+    if ( currentToken != T_IDENTIFIER ) return null;
+    let identifier = currentTokenText;
+    nextToken();
+    let specifier = eatProdSpecifier();
+    if ( specifier === null ) syntaxError();
+    let node = new TreeNode( T_REGULAR, identifier );
+    node.addBranch( specifier );
+    return node;
+}
+
+function eatProduction() {
+    // production := whitespace-prod | qualified-prod | regular-prod .
+    let prod = eatWhitespaceProd(); if ( prod ) return prod;
+    prod = eatQualifiedProd();      if ( prod ) return prod;
+    return eatRegularProd();
+}
+
+function eatProdList() {
+    // ROOT prod-list := ( production )+ .
+    let node = null;
+    for (;;) {
+        let expr = eatProduction();
+        if ( expr === null ) {
+            if ( node === null ) return null;
+            if ( node.numBranches == 1 ) return node.branches[0];
+            return node;
+        }
+        if ( node === null ) node = new TreeNode( T_PROD_LIST );
+        node.addBranch( expr );
     }
 }
 
@@ -242,7 +426,12 @@ function processInput() {
     // read first token
     nextToken();
 
+    // read production list
+    prodList = eatProdList();
+    if ( currentToken != T_EOF ) syntaxError();
+
     // ...
+
 }
 
 function help() {
