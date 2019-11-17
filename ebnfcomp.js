@@ -133,9 +133,13 @@ class TreeNode {
     print( indent ) {
         this.recurseWith( ( node, depth ) => {
 
-            console.log( );
+            let nSpace = depth * 2;
+            let sSpace = ''.padEnd( nSpace, ' ' );
+            let sArg   = node.nodeText !== null ? ' "' + node.nodeText + '"' : '';
 
+            console.log( sSpace + node.nodeTypeAsString + sArg );
 
+            return true;
         });
     }
 
@@ -298,3 +302,4 @@ function main() {
 }
 
 main();
+
