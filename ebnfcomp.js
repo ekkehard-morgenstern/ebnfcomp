@@ -32,7 +32,7 @@ var regexWHITESPACE = /^[ \t\r\n]+/;
 var regexCOMMENT    = /^--[^\n]+\n/;
 var regexIdentifier = /^[a-z0-9-]+/;
 var regexStrLiteral = /^('[^']+'|"[^"]+")/;
-var regexReExpr     = /^\/(\\\/|[^\\/]+)+\//;
+var regexReExpr     = /^\/(\\.|[^\\/]+)+\//;
 var regexKeyword    = /^[A-Z-]+/;
 
 // token symbols
@@ -59,6 +59,7 @@ const T_AND           = 19;
 const T_ASSIGN        = 20;
 const T_REGULAR       = 21;
 const T_PROD_LIST     = 22;
+const T_PLUS          = 23;
 
 // other global variables
 var inputFile;          // name of file to be read
@@ -106,7 +107,9 @@ class TreeNode {
             case T_ROOT          : s = 'T_ROOT'         ; break;
             case T_AND           : s = 'T_AND'          ; break;
             case T_ASSIGN        : s = 'T_ASSIGN'       ; break;
+            case T_REGULAR       : s = 'T_REGULAR'      ; break;
             case T_PROD_LIST     : s = 'T_PROD_LIST'    ; break;
+            case T_PLUS          : s = 'T_PLUS'         ; break;
         }
         return s;
     }
@@ -138,7 +141,7 @@ class TreeNode {
         return cont;
     }
 
-    print( indent ) {
+    print( indent = 0 ) {
         this.recurseWith( ( node, depth ) => {
 
             let nSpace = depth * 2;
@@ -241,6 +244,7 @@ function nextToken() {
         if ( ch == '|' ) { eatChar(); currentToken = T_COLUMN; return; }
         if ( ch == '.' ) { eatChar(); currentToken = T_DOT; return; }
         if ( ch == '!' ) { eatChar(); currentToken = T_FAIL; return; }
+        if ( ch == '+' ) { eatChar(); currentToken = T_PLUS; return; }
 
         // special cases
         if ( inputData.startsWith( ':=' ) ) {
@@ -363,7 +367,7 @@ function eatProdQualifier() {
     // prod-qualifier := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
     switch ( currentToken ) {
         case T_TOKEN_ELEMENT: case T_NAMED_TOKEN: case T_TOKEN: case T_ROOT:
-            let node = new TreeNode( currenToken );
+            let node = new TreeNode( currentToken );
             nextToken();
             return node;
     }
@@ -430,7 +434,12 @@ function processInput() {
     prodList = eatProdList();
     if ( currentToken != T_EOF ) syntaxError();
 
-    // ...
+    if ( prodList === null ) {
+        console.log( "? input empty, nothing to do" );
+        return;
+    }
+
+    prodList.print();
 
 }
 

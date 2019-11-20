@@ -73,6 +73,7 @@ NAMED-TOKEN   rbrace         := '}' .
 NAMED-TOKEN   column         := '|' .
 NAMED-TOKEN   dot            := '.' .
 NAMED-TOKEN   fail           := '!' .
+NAMED-TOKEN   plus           := '+' .
 NAMED-TOKEN   whitespace     := 'WHITESPACE' .
 NAMED-TOKEN   comment        := 'COMMENT' .
 NAMED-TOKEN   token-element  := 'TOKEN-ELEMENT' .

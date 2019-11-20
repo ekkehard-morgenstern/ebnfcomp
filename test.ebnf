@@ -43,6 +43,7 @@ NAMED-TOKEN   rbrace         := '}' .
 NAMED-TOKEN   column         := '|' .
 NAMED-TOKEN   dot            := '.' .
 NAMED-TOKEN   fail           := '!' .
+NAMED-TOKEN   plus           := '+' .
 NAMED-TOKEN   whitespace     := 'WHITESPACE' .
 NAMED-TOKEN   comment        := 'COMMENT' .
 NAMED-TOKEN   token-element  := 'TOKEN-ELEMENT' .
@@ -56,12 +57,12 @@ NAMED-TOKEN   root           := 'ROOT' .
 
 base-expr   := identifier | str-literal | re-expr | '(' expr ')' [ '+' ] | '[' expr ']' | '{' expr '}' .
 fail-expr   := base-expr [ '!' ] .
-and-expr    := ( base-expr )+ .
+and-expr    := ( fail-expr )+ .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
 prod-specifier   := ':=' expr '.' .
-whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) ( identifier prod-specifier )! .
+whitespace-prod  := ( "WHITESPACE" | "COMMENT" ) prod-specifier! .
 prod-qualifier   := "TOKEN-ELEMENT" | "NAMED-TOKEN" | "TOKEN" | "ROOT" .
 qualified-prod   := prod-qualifier ( identifier prod-specifier )! .
 regular-prod     := identifier prod-specifier! .
