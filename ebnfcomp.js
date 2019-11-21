@@ -32,7 +32,7 @@ var regexWHITESPACE = /^[ \t\r\n]+/;
 var regexCOMMENT    = /^--[^\n]+\n/;
 var regexIdentifier = /^[a-z0-9-]+/;
 var regexStrLiteral = /^('[^']+'|"[^"]+")/;
-var regexReExpr     = /^\/(\\.|[^\\/]+)+\//;
+var regexReExpr     = /^\/(\\.|[^\\\/]+)+\//;
 var regexKeyword    = /^[A-Z-]+/;
 
 // token symbols
@@ -46,16 +46,16 @@ const T_LBRACKET      = 6;
 const T_RBRACKET      = 7;
 const T_LBRACE        = 8;
 const T_RBRACE        = 9;
-const T_COLUMN        = 10;
+const T_ALTERNATIVE   = 10;
 const T_DOT           = 11;
-const T_FAIL          = 12;
+const T_FAIL_IF_UNMATCHED = 12;
 const T_WHITESPACE    = 13;
 const T_COMMENT       = 14;
 const T_TOKEN_ELEMENT = 15;
 const T_NAMED_TOKEN   = 16;
 const T_TOKEN         = 17;
 const T_ROOT          = 18;
-const T_AND           = 19;
+const T_SEQUENCE      = 19;
 const T_ASSIGN        = 20;
 const T_REGULAR       = 21;
 const T_PROD_LIST     = 22;
@@ -96,16 +96,16 @@ class TreeNode {
             case T_RBRACKET      : s = 'T_RBRACKET'     ; break;
             case T_LBRACE        : s = 'T_LBRACE'       ; break;
             case T_RBRACE        : s = 'T_RBRACE'       ; break;
-            case T_COLUMN        : s = 'T_COLUMN'       ; break;
+            case T_ALTERNATIVE   : s = 'T_ALTERNATIVE'  ; break;
             case T_DOT           : s = 'T_DOT'          ; break;
-            case T_FAIL          : s = 'T_FAIL'         ; break;
+            case T_FAIL_IF_UNMATCHED: s = 'T_FAIL_IF_UNMATCHED'; break;
             case T_WHITESPACE    : s = 'T_WHITESPACE'   ; break;
             case T_COMMENT       : s = 'T_COMMENT'      ; break;
             case T_TOKEN_ELEMENT : s = 'T_TOKEN_ELEMENT'; break;
             case T_NAMED_TOKEN   : s = 'T_NAMED_TOKEN'  ; break;
             case T_TOKEN         : s = 'T_TOKEN'        ; break;
             case T_ROOT          : s = 'T_ROOT'         ; break;
-            case T_AND           : s = 'T_AND'          ; break;
+            case T_SEQUENCE      : s = 'T_SEQUENCE'     ; break;
             case T_ASSIGN        : s = 'T_ASSIGN'       ; break;
             case T_REGULAR       : s = 'T_REGULAR'      ; break;
             case T_PROD_LIST     : s = 'T_PROD_LIST'    ; break;
@@ -144,7 +144,7 @@ class TreeNode {
     print( indent = 0 ) {
         this.recurseWith( ( node, depth ) => {
 
-            let nSpace = depth * 2;
+            let nSpace = indent + depth * 2;
             let sSpace = ''.padEnd( nSpace, ' ' );
             let sArg   = node.nodeText !== null ? ' "' + node.nodeText + '"' : '';
 
@@ -241,9 +241,9 @@ function nextToken() {
         if ( ch == ']' ) { eatChar(); currentToken = T_RBRACKET; return; }
         if ( ch == '{' ) { eatChar(); currentToken = T_LBRACE; return; }
         if ( ch == '}' ) { eatChar(); currentToken = T_RBRACE; return; }
-        if ( ch == '|' ) { eatChar(); currentToken = T_COLUMN; return; }
+        if ( ch == '|' ) { eatChar(); currentToken = T_ALTERNATIVE; return; }
         if ( ch == '.' ) { eatChar(); currentToken = T_DOT; return; }
-        if ( ch == '!' ) { eatChar(); currentToken = T_FAIL; return; }
+        if ( ch == '!' ) { eatChar(); currentToken = T_FAIL_IF_UNMATCHED; return; }
         if ( ch == '+' ) { eatChar(); currentToken = T_PLUS; return; }
 
         // special cases
@@ -288,9 +288,9 @@ function eatFailExpr() {
     // fail-expr := base-expr [ '!' ] .
     let expr = eatBaseExpr();
     if ( expr === null ) return null;
-    if ( currentToken == T_FAIL ) {
+    if ( currentToken == T_FAIL_IF_UNMATCHED ) {
         nextToken();
-        let fail = new TreeNode( T_FAIL );
+        let fail = new TreeNode( T_FAIL_IF_UNMATCHED );
         fail.addBranch( expr );
         return fail;
     }
@@ -307,7 +307,7 @@ function eatAndExpr() {
             if ( node.numBranches == 1 ) return node.branches[0];
             return node;
         }
-        if ( node === null ) node = new TreeNode( T_AND );
+        if ( node === null ) node = new TreeNode( T_SEQUENCE );
         node.addBranch( expr );
     }
 }
@@ -317,7 +317,7 @@ function eatOrExpr() {
     let node = null;
     for (;;) {
         if ( node !== null ) {
-            if ( currentToken != T_COLUMN ) {
+            if ( currentToken != T_ALTERNATIVE ) {
                 if ( node.numBranches == 1 ) return node.branches[0];
                 return node;
             }
@@ -328,7 +328,7 @@ function eatOrExpr() {
             if ( node === null ) return null;
             syntaxError();
         }
-        if ( node === null ) node = new TreeNode( T_COLUMN );
+        if ( node === null ) node = new TreeNode( T_ALTERNATIVE );
         node.addBranch( expr );
     }
 }

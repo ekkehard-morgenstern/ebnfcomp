@@ -29,9 +29,8 @@ TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 -- during parsing of token elements, whitespace and comment skipping will be disabled
 -- regular expressions are not interpreted (anymore) but passed through to the outer layer
 
-NAMED-TOKEN   esc-slash      := '\/' .
 NAMED-TOKEN   slash          := '/' .
-TOKEN-ELEMENT re-def-chr     := '\/' | /[^\/]+/ .
+TOKEN-ELEMENT re-def-chr     := /\\.|[^\\\/]+/ .
 TOKEN         re-expr        := '/' ( ( re-def-chr )+ '/' )! .
 
 NAMED-TOKEN   lparen         := '(' .
