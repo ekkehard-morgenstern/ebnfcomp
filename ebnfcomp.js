@@ -24,8 +24,12 @@
 
 // TBD
 
+// -- Dependencies ----------------------------------------------------------------------------------
+
 // modules we're dependent on
 var fs = require( 'fs' );
+
+// -- Regular Expressions ---------------------------------------------------------------------------
 
 // regular expressions
 var regexWHITESPACE = /^[ \t\r\n]+/;
@@ -34,6 +38,8 @@ var regexIdentifier = /^[a-z0-9-]+/;
 var regexStrLiteral = /^('[^']+'|"[^"]+")/;
 var regexReExpr     = /^\/(\\.|[^\\\/]+)+\//;
 var regexKeyword    = /^[A-Z-]+/;
+
+// -- Constants -------------------------------------------------------------------------------------
 
 // token symbols
 const T_EOF           = 0;
@@ -61,6 +67,8 @@ const T_REGULAR       = 21;
 const T_PROD_LIST     = 22;
 const T_PLUS          = 23;
 
+// -- Global Variables ------------------------------------------------------------------------------
+
 // other global variables
 var inputFile;          // name of file to be read
 var inputData;          // data of input file
@@ -68,6 +76,9 @@ var currentToken;       // the token we're currently at
 var currentTokenText;   // the text of that token
 var currentLine;        // current line number
 var prodList;           // production list (syntax analysis result)
+var treeOnly = false;   // just output syntax tree
+
+// -- Classes ---------------------------------------------------------------------------------------
 
 // classes
 
@@ -155,6 +166,8 @@ class TreeNode {
     }
 
 }
+
+// -- Functions -------------------------------------------------------------------------------------
 
 // main functions
 
@@ -439,7 +452,12 @@ function processInput() {
         return;
     }
 
-    prodList.print();
+    if ( treeOnly ) {
+        prodList.print();
+        process.exit( 0 );
+    }
+
+    
 
 }
 
@@ -447,6 +465,7 @@ function help() {
     console.log( 'Usage: ' + process.argv[0] + ' ' + process.argv[1] + ' [options] inputfile' );
     console.log( 'Options:' );
     console.log( '  --help, -h, -?      (this)' );
+    console.log( '  --tree, -t          output syntax tree only' );
 }
 
 function processCmdLine() {
@@ -471,6 +490,8 @@ function processCmdLine() {
                 if ( value == 'help' || value == 'h' || value == '?' ) {
                     help();
                     process.exit( 1 );                   
+                } else if ( value == 'tree' || value == 't' ) {
+                    treeOnly = true;
                 } else {
                     console.error( '? unknown option: ' + originalValue );
                     process.exit( 1 );                                  
@@ -498,6 +519,8 @@ function main() {
 
     processInput();
 }
+
+// -- Main Program ----------------------------------------------------------------------------------
 
 main();
 
