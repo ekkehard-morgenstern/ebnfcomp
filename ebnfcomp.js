@@ -82,12 +82,139 @@ var treeOnly = false;   // just output syntax tree
 
 // classes
 
+class Annotation {
+
+    constructor() {}
+
+    describe() { return ''; }
+
+}
+
+class Production extends Annotation {
+
+    constructor( type, name, definition ) {
+
+        super();
+
+        this.type       = type;
+        this.name       = name;
+        this.definition = definition;
+    }
+
+    describe() { return 'Production('+this.type+','+this.name+')'; }
+}
+
+class Whitespace extends Production {
+
+    constructor( definition ) {
+
+        super( T_WHITESPACE, 'WHITESPACE', definition );
+    }
+
+    describe() { return 'Whitespace()'; }
+}
+
+class Comment extends Production {
+
+    constructor( definition ) {
+
+        super( T_COMMENT, 'COMMENT', definition );
+    }
+
+    describe() { return 'Comment()'; }
+}
+
+class Token extends Production {
+
+    constructor( name, definition ) {
+
+        super( T_TOKEN, name, definition );
+    }
+
+    describe() { return 'Token('+this.name+')'; }
+}
+
+class NamedToken extends Production {
+
+    constructor( name, definition ) {
+
+        super( T_NAMED_TOKEN, name, definition );
+    }
+
+    describe() { return 'NamedToken('+this.name+')'; }
+}
+
+class TokenElement extends Production {
+
+    constructor( name, definition ) {
+
+        super( T_TOKEN_ELEMENT, name, definition );
+    }
+
+    describe() { return 'TokenElement('+this.name+')'; }
+}
+
+class RegularProduction extends Production {
+
+    constructor( name, definition ) {
+
+        super( T_REGULAR, name, definition );
+    }
+
+    describe() { return 'RegularProduction('+this.name+')'; }
+}
+
+class ProductionList extends Annotation {
+
+    constructor( definition ) {
+
+        super();
+
+        this.productions = definition;
+    }
+
+    describe() { return 'ProductionList()'; }
+}
+
+class RootProduction extends Production {
+
+    constructor( name, definition ) {
+
+        super( T_ROOT, name, definition );
+    }
+
+    describe() { return 'RootProduction('+this.name+')'; }
+}
+
+class AnnotationFactory {
+
+    static createFrom( node ) {
+   
+        let type = node.nodeType;
+        let name = node.nodeText;
+
+        switch ( type ) {
+            case T_PROD_LIST:       return new ProductionList( node.branches );
+            case T_WHITESPACE:      return new Whitespace( node.branches[0] );
+            case T_COMMENT:         return new Comment( node.branches[0] );
+            case T_TOKEN:           return new Token( name, node.branches[0] );
+            case T_NAMED_TOKEN:     return new NamedToken( name, node.branches[0] );
+            case T_TOKEN_ELEMENT:   return new TokenElement( name, node.branches[0] );
+            case T_REGULAR:         return new RegularProduction( name, node.branches[0] );
+            case T_ROOT:            return new RootProduction( name, node.branches[0] );
+        }
+
+        return null;
+    }
+}
+
 class TreeNode {
 
     constructor( nodeType, nodeText = null ) {
         this.nodeType = nodeType; 
         this.nodeText = nodeText;
         this.branches = new Array();
+        this.annotation = null;
     }
 
     get nodeTypeAsInt() {
@@ -158,8 +285,17 @@ class TreeNode {
             let nSpace = indent + depth * 2;
             let sSpace = ''.padEnd( nSpace, ' ' );
             let sArg   = node.nodeText !== null ? ' "' + node.nodeText + '"' : '';
+            let sAnnot = node.annotation !== null ? node.annotation.describe() : '';
 
-            console.log( sSpace + node.nodeTypeAsString + sArg );
+            console.log( sSpace + node.nodeTypeAsString + sArg + ' ' + sAnnot );
+
+            return true;
+        });
+    }
+
+    annotate() {
+        this.recurseWith( node => {
+            node.annotation = AnnotationFactory.createFrom( node );
 
             return true;
         });
@@ -451,6 +587,8 @@ function processInput() {
         console.log( "? input empty, nothing to do" );
         return;
     }
+
+    prodList.annotate();
 
     if ( treeOnly ) {
         prodList.print();
