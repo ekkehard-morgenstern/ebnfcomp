@@ -778,6 +778,20 @@ static void text_to_C_text( char buf[512], const char* text ) {
     *d = '\0';
 }
 
+static bool text_to_asm_text( char buf[512], const char* text, char qc ) {
+    const char* s = text; char* d = &buf[0]; char* e = &buf[510];
+    while ( *s != '\0' ) {
+        if ( *s == qc ) {
+            return false;
+        } else if ( d+1 <= e ) {
+            *d++ = *s;
+        }
+        ++s;
+    }
+    *d = '\0';
+    return true;
+}
+
 static int branches_ix = 0;
 
 static void output_decls_helper( treenode_t* node ) {
@@ -971,7 +985,7 @@ static void output_code( void ) {
 static int output_branches_helper_asm( treenode_t* node, int index ) {
     if ( node == 0 ) return 0;
     if ( node->id >= 0 && node->branchesIx == index ) {
-        printf( "                        # %d: %s branches\n"
+        printf( "                        ; %d: %s branches\n"
                 "                        dw          ",
             node->branchesIx, node->exportIdent );
         for ( size_t i=0; i < node->numBranches; ++i ) {
@@ -1002,12 +1016,64 @@ static void output_branches_asm( void ) {
     }
 }
 
+static bool output_texts_helper_asm( treenode_t* node, int id ) {
+    if ( node == 0 ) return false;
+    if ( node->id == id ) {
+        bool numId = node->token != T_PRODUCTION;
+        char text[1024], labl[256];
+        text[0] = '\0';
+        if ( numId ) {
+            if ( node->text ) {
+                char tmp[512];
+                if ( text_to_asm_text( tmp, node->text, '\'' ) ) {
+                    snprintf( text, 1024U, "'%s'", tmp );
+                } else if ( text_to_asm_text( tmp, node->text, '"' ) ) {
+                    snprintf( text, 1024U, "\"%s\"", tmp );
+                } else {
+                    const char* s = node->text; bool first = true;
+                    char* d = text; char* e = &text[1023];
+                    while ( *s != '\0' ) {
+                        if ( !first ) {
+                            if ( d+1 < e ) *d++ = ',';
+                        } else {
+                            first = false;
+                        }
+                        if ( d+4 < e ) {
+                            unsigned char hnyb = *s >> 4;
+                            unsigned char lnyb = *s & 15;
+                            *d++ = '0';
+                            *d++ = 'x';
+                            *d++ = "0123456789abcdef"[hnyb];
+                            *d++ = "0123456789abcdef"[lnyb];
+                        }
+                    }
+                    *d = '\0';
+                }
+            }
+        }
+        if ( text[0] != '\0' ) {
+            snprintf( labl, 256U, "prod_%d_text", node->id );
+            printf( "%-23s db          %s,0\n", labl, text );
+        }
+        return true;
+    }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        if ( output_texts_helper_asm( node->branches[i], id ) ) return true;
+    }
+    return false;
+}
+
+static void output_texts_asm( void ) {
+    for ( int i=0; i < id; ++i ) {
+        output_texts_helper_asm( tree, i );
+    }
+}
+
 static bool output_impls_helper_asm( treenode_t* node, int id ) {
     if ( node == 0 ) return false;
     if ( node->id == id ) {
         bool numId = node->token != T_PRODUCTION;
-        char text[1024]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
-        text[0] = '0'; text[1] = '\0';
+        const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
         if ( numId ) {
             if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
                 nodeClass = "NC_TERMINAL";
@@ -1025,20 +1091,21 @@ static bool output_impls_helper_asm( treenode_t* node, int id ) {
                     default: break;
                 }
             }
-            if ( node->text ) {
-                char tmp[512]; text_to_C_text( tmp, node->text );
-                snprintf( text, 1024U, "\"%s\"", tmp );
-            }
         } else {
             nodeClass = "NC_PRODUCTION";
         }
-        printf(
-            "    // %d: %s\n"
-            "    { %s, %s, %s, %s, %d, %d },\n"
-            , node->id, node->exportIdent
-            , nodeClass, node->nodeTypeEnum, termType, text
-            , (int) node->numBranches, node->branchesIx
-        );
+        printf( "                        ; %d: %s\n", node->id,
+            node->exportIdent );
+        printf( "                        db          %s, %s\n", nodeClass,
+            termType );
+        printf( "                        dw          %s, %d, %d\n",
+            node->nodeTypeEnum, (int) node->numBranches, node->branchesIx );
+        if ( numId && node->text != 0 ) {
+            printf( "                        dq          prod_%d_text\n",
+                node->id );
+        } else {
+            printf( "                        dq          0\n" );
+        }
         return true;
     }
     for ( size_t i=0; i < node->numBranches; ++i ) {
@@ -1085,12 +1152,14 @@ static void output_code_asm( void ) {
     );
     output_decls_helper( tree );
     printf(
-        "# branches\n\n"
         "branches:\n"
     );
     output_branches_asm();
+    printf( "\n\n" );
+    output_texts_asm();
     printf(
         "\n\n"
+        "                        align       8,db 0\n\n"
         "parsingTable:\n"
     );
     output_impls_asm();
