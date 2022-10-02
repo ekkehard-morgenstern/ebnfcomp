@@ -16,7 +16,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     Contact Info:
-    E-Mail: ekkehard@ekkehardmorgenstern.de 
+    E-Mail: ekkehard@ekkehardmorgenstern.de
     Mail: Ekkehard Morgenstern, Mozartstr. 1, 76744 Woerth am Rhein, Germany, Europe
 */
 
@@ -414,7 +414,7 @@ static bool read_re_or_expr( void ) {
         rdch();
         if ( !read_re_and_expr() ) report( "expression expected in regular expression" );
     } while ( true );
-    return true;    
+    return true;
 }
 
 static bool read_re_expr( void ) {
@@ -437,7 +437,7 @@ static treenode_t* read_regex( void ) {
 static treenode_t* read_expr( void );
 
 static treenode_t* read_paren_expr( void ) {
-    // '(' expr ')' 
+    // '(' expr ')'
     rdch();
     treenode_t* expr = read_expr();
     if ( expr == 0 ) report( "expression expected after '('" );
@@ -447,7 +447,7 @@ static treenode_t* read_paren_expr( void ) {
 }
 
 static treenode_t* read_brack_expr( void ) {
-    // '[' expr ']' 
+    // '[' expr ']'
     rdch();
     treenode_t* expr = read_expr();
     if ( expr == 0 ) report( "expression expected after '['" );
@@ -459,7 +459,7 @@ static treenode_t* read_brack_expr( void ) {
 }
 
 static treenode_t* read_brace_expr( void ) {
-    // '{' expr '}' 
+    // '{' expr '}'
     rdch();
     treenode_t* expr = read_expr();
     if ( expr == 0 ) report( "expression expected after '{'" );
@@ -707,24 +707,24 @@ static int id = 0;
 
 static void output_enums_helper( treenode_t* node ) {
     if ( node == 0 ) return;
-    if ( is_export_node( node ) && node->id == -1 ) {       
-        char tmp[256]; bool print = true;
+    if ( is_export_node( node ) && node->id == -1 ) {
+        char tmp[512]; bool print = true;
         if ( node->token == T_PRODUCTION ) {
             name_to_C_enum( tmp, node->text );
         } else if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
             const char* text = 0;
             if ( is_name( node->text ) ) {
                 text = name_to_label( node->text );
-                snprintf( tmp, 256U, "NT_TERMINAL_%s", text );
+                snprintf( tmp, 512U, "NT_TERMINAL_%s", text );
                 if ( check_have_label( tmp ) ) print = false;
             } else if ( ( text = operator_to_label( node->text ) ) ) {
-                snprintf( tmp, 256U, "NT_TERMINAL_%s", text );
+                snprintf( tmp, 512U, "NT_TERMINAL_%s", text );
                 if ( check_have_label( tmp ) ) print = false;
             } else {
-                snprintf( tmp, 256U, "NT_TERMINAL_%d", id );
+                snprintf( tmp, 512U, "NT_TERMINAL_%d", id );
             }
         } else {
-            snprintf( tmp, 256U, "%s", "_NT_GENERIC" );
+            snprintf( tmp, 512U, "%s", "_NT_GENERIC" );
             print = false;
         }
         set_node_type_enum( node, tmp );
@@ -744,20 +744,20 @@ static void name_to_C_name( char buf[256], const char* name, const char* prefix 
     }
 }
 
-static void text_to_C_text( char buf[256], const char* text ) {
-    const char* s = text; char* d = &buf[0]; char* e = &buf[255];
+static void text_to_C_text( char buf[512], const char* text ) {
+    const char* s = text; char* d = &buf[0]; char* e = &buf[510];
     while ( *s != '\0' ) {
         if ( *s == '\"' ) {
-            if ( d < e-1 ) {
+            if ( d+2 <= e ) {
                 *d++ = '\\';
                 *d++ = '\"';
             }
         } else if ( *s == '\\' ) {
-            if ( d < e-1 ) {
+            if ( d+2 <= e ) {
                 *d++ = '\\';
                 *d++ = '\\';
             }
-        } else if ( d < e ) {
+        } else if ( d+1 <= e ) {
             *d++ = *s;
         }
         ++s;
@@ -853,7 +853,7 @@ static bool output_impls_helper( treenode_t* node, int id ) {
     if ( node == 0 ) return false;
     if ( node->id == id ) {
         bool numId = node->token != T_PRODUCTION;
-        char text[256]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
+        char text[1024]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
         text[0] = '0'; text[1] = '\0';
         if ( numId ) {
             if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
@@ -873,13 +873,13 @@ static bool output_impls_helper( treenode_t* node, int id ) {
                 }
             }
             if ( node->text ) {
-                char tmp[256]; text_to_C_text( tmp, node->text );
-                snprintf( text, 256U, "\"%s\"", tmp );
+                char tmp[512]; text_to_C_text( tmp, node->text );
+                snprintf( text, 1024U, "\"%s\"", tmp );
             }
         } else {
             nodeClass = "NC_PRODUCTION";
         }
-        printf( 
+        printf(
             "    // %d: %s\n"
             "    { %s, %s, %s, %s, %d, %d },\n"
             , node->id, node->exportIdent
@@ -940,13 +940,13 @@ static void output_code( void ) {
         , branches_ix
     );
     output_branches();
-    printf( 
+    printf(
         "};\n\n"
         "static const parsingnode_t parsingTable[%d] = {\n"
         , id
     );
     output_impls();
-    printf( 
+    printf(
         "};\n\n"
     );
 }
