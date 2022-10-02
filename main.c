@@ -607,9 +607,11 @@ static void help( void ) {
         "options:\n"
         "    --help, -h                 (this)\n"
         "    --tree, -t                 output syntax tree\n"
+        "    --asm , -a                 output assembly language, not C\n"
         "default behavior:\n"
         "    compiles EBNF specified on standard input to internal form,\n"
-        "    then outputs C code for a parsing table to standard output.\n"
+        "    then outputs C or assembly language code for a parsing table to\n"
+        "    standard output.\n"
     );
 }
 
@@ -705,7 +707,7 @@ static bool check_have_label( const char* text ) {
 
 static int id = 0;
 
-static void output_enums_helper( treenode_t* node ) {
+static void output_enums_helper( treenode_t* node, bool doasm ) {
     if ( node == 0 ) return;
     if ( is_export_node( node ) && node->id == -1 ) {
         char tmp[512]; bool print = true;
@@ -728,11 +730,22 @@ static void output_enums_helper( treenode_t* node ) {
             print = false;
         }
         set_node_type_enum( node, tmp );
-        if ( print ) printf( "    %s,\n", tmp );
+        if ( print ) {
+            if ( doasm ) {
+                static int cnt = 1;
+                // 00000000001111111111222222222233333333334444444444
+                // 01234567890123456789012345678901234567890123456789
+                // _NT_GENERIC             equ         0
+                printf( "%-23s equ         %d\n", tmp, cnt++ );
+            } else {
+                printf( "    %s,\n", tmp );
+            }
+
+        }
         node->id = id++;
     }
     for ( size_t i=0; i < node->numBranches; ++i ) {
-        output_enums_helper( node->branches[i] );
+        output_enums_helper( node->branches[i], doasm );
     }
 }
 
@@ -817,6 +830,8 @@ static void report2( const char* fmt, ... ) {
     va_end( ap );
     exit( EXIT_FAILURE );
 }
+
+// -- default output: C -------------------------------------------------------
 
 static int output_branches_helper( treenode_t* node, int index ) {
     if ( node == 0 ) return 0;
@@ -921,7 +936,7 @@ static void output_code( void ) {
         "typedef enum _nodetype_t {\n"
         "    _NT_GENERIC,\n"
     );
-    output_enums_helper( tree );
+    output_enums_helper( tree, false );
     printf( "%s",
         "} nodetype_t;\n\n"
         "typedef struct _parsingnode_t {\n"
@@ -951,9 +966,145 @@ static void output_code( void ) {
     );
 }
 
+// -- optional output: Assembly Language --------------------------------------
+
+static int output_branches_helper_asm( treenode_t* node, int index ) {
+    if ( node == 0 ) return 0;
+    if ( node->id >= 0 && node->branchesIx == index ) {
+        printf( "                        # %d: %s branches\n"
+                "                        dw          ",
+            node->branchesIx, node->exportIdent );
+        for ( size_t i=0; i < node->numBranches; ++i ) {
+            treenode_t* branch = node->branches[i]; int id;
+            bool last = i == node->numBranches - 1U;
+            if ( branch->id >= 0 ) {
+                printf( "%d%s ", branch->id, last?"":"," );
+            } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
+                printf( "%d%s ", id, last?"":"," );
+            } else {
+                if ( branch->token == T_IDENTIFIER ) report2( "production '%s' not found", branch->text );
+                printf( "-1 /* %s */%s ", token2text(branch->token), last?"":"," );
+            }
+        }
+        printf( "\n" );
+        return node->numBranches;
+    }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        int n = output_branches_helper_asm( node->branches[i], index );
+        if ( n ) return n;
+    }
+    return 0;
+}
+
+static void output_branches_asm( void ) {
+    for ( int i=0; i < branches_ix; ) {
+        i += output_branches_helper_asm( tree, i );
+    }
+}
+
+static bool output_impls_helper_asm( treenode_t* node, int id ) {
+    if ( node == 0 ) return false;
+    if ( node->id == id ) {
+        bool numId = node->token != T_PRODUCTION;
+        char text[1024]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
+        text[0] = '0'; text[1] = '\0';
+        if ( numId ) {
+            if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
+                nodeClass = "NC_TERMINAL";
+                if ( node->token == T_STR_LITERAL ) {
+                    termType = "TT_STRING";
+                } else { // T_REG_EX
+                    termType = "TT_REGEX";
+                }
+            } else {
+                switch ( node->token ) {
+                    case T_AND_EXPR:    nodeClass = "NC_MANDATORY"; break;
+                    case T_OR_EXPR:     nodeClass = "NC_ALTERNATIVE"; break;
+                    case T_BRACK_EXPR:  nodeClass = "NC_OPTIONAL"; break;
+                    case T_BRACE_EXPR:  nodeClass = "NC_OPTIONAL_REPETITIVE"; break;
+                    default: break;
+                }
+            }
+            if ( node->text ) {
+                char tmp[512]; text_to_C_text( tmp, node->text );
+                snprintf( text, 1024U, "\"%s\"", tmp );
+            }
+        } else {
+            nodeClass = "NC_PRODUCTION";
+        }
+        printf(
+            "    // %d: %s\n"
+            "    { %s, %s, %s, %s, %d, %d },\n"
+            , node->id, node->exportIdent
+            , nodeClass, node->nodeTypeEnum, termType, text
+            , (int) node->numBranches, node->branchesIx
+        );
+        return true;
+    }
+    for ( size_t i=0; i < node->numBranches; ++i ) {
+        if ( output_impls_helper_asm( node->branches[i], id ) ) return true;
+    }
+    return false;
+}
+
+static void output_impls_asm( void ) {
+    for ( int i=0; i < id; ++i ) {
+        output_impls_helper_asm( tree, i );
+    }
+}
+
+static void output_code_asm( void ) {
+    printf( "%s",
+        "; code auto-generated by ebnfcomp; do not modify!\n"
+        "; (code might get overwritten during next ebnfcomp invocation)\n\n"
+        "                        cpu         x64\n"
+        "                        bits        64\n\n"
+        "                        section     .rodata\n\n"
+        "NC_TERMINAL             equ         0\n"
+        "NC_PRODUCTION           equ         1\n"
+        "NC_MANDATORY            equ         2\n"
+        "NC_ALTERNATIVE          equ         3\n"
+        "NC_OPTIONAL             equ         4\n"
+        "NC_OPTIONAL_REPETITIVE  equ         5\n\n"
+        "TT_UNDEF                equ         0\n"
+        "TT_STRING               equ         1\n"
+        "TT_REGEX                equ         2\n\n"
+        "_NT_GENERIC             equ         0\n"
+    );
+    output_enums_helper( tree, true );
+    printf( "%s",
+        "\n"
+        "                        struc      parsingnode\n"
+        "                           pn_nodeClass:       resb    1\n"
+        "                           pn_termType:        resb    1\n"
+        "                           pn_nodeType:        resw    1\n"
+        "                           pn_numBranches:     resw    1\n"
+        "                           pn_branches:        resw    1\n"
+        "                           pn_text:            resq    1\n"
+        "                        endstruc\n\n"
+    );
+    output_decls_helper( tree );
+    printf(
+        "# branches\n\n"
+        "branches:\n"
+    );
+    output_branches_asm();
+    printf(
+        "\n\n"
+        "parsingTable:\n"
+    );
+    output_impls_asm();
+    printf(
+        "\n\n"
+    );
+}
+
+// -- main program ------------------------------------------------------------
+
 int main( int argc, char** argv ) {
 
     bool printTree = false;
+    bool printAsm  = false;
 
     for ( int i=1; i < argc; ++i ) {
         const char* arg = argv[i];
@@ -963,6 +1114,9 @@ int main( int argc, char** argv ) {
         }
         if ( strcmp( arg, "--tree" ) == 0 || strcmp( arg, "-t" ) == 0 ) {
             printTree = true;
+        }
+        if ( strcmp( arg, "--asm" ) == 0 || strcmp( arg, "-a" ) == 0 ) {
+            printAsm = true;
         }
     }
 
@@ -974,7 +1128,11 @@ int main( int argc, char** argv ) {
 
     tree = prodlist;
     deduplicate_literals( &tree, tree );
-    output_code();
+    if ( printAsm ) {
+        output_code_asm();
+    } else {
+        output_code();
+    }
 
     return EXIT_SUCCESS;
 }
