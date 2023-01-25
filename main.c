@@ -25,36 +25,45 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 /*
 language syntax:
 
-identifier  := /[a-z0-9-]+/ .
-str-literal := /'[^']+'/ | /"[^"]+"/ .
+TOKEN hexadecimal := /\$[0-9a-fA-F]+/ .
+
+TOKEN identifier  := /[a-z0-9-]+/ .
+TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of regular expressions, whitespace skipping will be disabled
-re-any      := '.' .
-re-chr      := '\' /./ | /[^\/.*?[(|]/ .
+TOKEN re-any      := '.' .
+TOKEN re-chr      := '\' /./ | /[^\/.*?[(|]/ .
 
-re-cc-chr   := '\' /./ | /[^\\\]]/ .
-re-cc-rng   := re-cc-chr '-' re-cc-chr .
-re-cc-item  := re-cc-rng | re-cc-chr .
-re-cc-items := re-cc-item { re-cc-item } .
-re-cc       := '[' [ '^' ] re-cc-items ']' .
+TOKEN re-cc-chr   := '\' /./ | /[^\\\]]/ .
+TOKEN re-cc-rng   := re-cc-chr '-' re-cc-chr .
+TOKEN re-cc-item  := re-cc-rng | re-cc-chr .
+TOKEN re-cc-items := re-cc-item { re-cc-item } .
+TOKEN re-cc       := '[' [ '^' ] re-cc-items ']' .
 
-re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
-re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
-re-and-expr    := re-repeat-expr { re-repeat-expr } .
-re-or-expr     := re-and-expr { '|' re-and-expr } .
-re-expr        := re-or-expr .
-regex          := '/' re-expr '/' .
+TOKEN re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
+TOKEN re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
+TOKEN re-and-expr    := re-repeat-expr { re-repeat-expr } .
+TOKEN re-or-expr     := re-and-expr { '|' re-and-expr } .
+TOKEN re-expr        := re-or-expr .
+TOKEN regex          := '/' re-expr '/' .
 
-base-expr   := identifier | str-literal | regex | '(' expr ')' | '[' expr ']' | '{' expr '}' .
+bin-field-type := 'BYTE' | 'WORD' | 'DWORD' | 'QWORD' .
+
+bin-match   := hexadecimal | bin-field-type [ ':' identifier |
+               '*' identifier ] .
+
+base-expr   := identifier | str-literal | regex | bin-match |
+               '(' expr ')' | '[' expr ']' | '{' expr '}' .
 and-expr    := base-expr { base-expr } .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
-production  := identifier ':=' expr '.' .
+production  := [ 'TOKEN' ] identifier ':=' expr '.' .
 prod-list   := production { production } .
 
 */
@@ -70,7 +79,9 @@ typedef enum _token_t {
     T_OR_EXPR,
     T_EXPR,
     T_PRODUCTION,
-    T_PROD_LIST
+    T_PROD_LIST,
+    T_BIN_DATA,
+    T_BIN_FIELD,
 } token_t;
 
 static const char* token2text( token_t token ) {
@@ -87,6 +98,8 @@ static const char* token2text( token_t token ) {
         case T_EXPR:        return "T_EXPR";
         case T_PRODUCTION:  return "T_PRODUCTION";
         case T_PROD_LIST:   return "T_PROD_LIST";
+        case T_BIN_DATA:    return "T_BIN_DATA";
+        case T_BIN_FIELD:   return "T_BIN_FIELD";
     }
 }
 
@@ -212,6 +225,9 @@ static int  rpos = 0;
 static char regex[256];
 static int  repos = 0;
 
+static char pbbuf[256]; // putback buffer
+static int  pbpos = -1;
+
 static void storech() {
     rngbuf[wpos] = (char) ch;
     wpos = ( wpos + 1 ) & 63;
@@ -226,22 +242,33 @@ static void printrng() {
     fputc( '\n', stderr );
 }
 
+static void putback( int c ) {
+    if ( pbpos < 255 ) pbbuf[++pbpos] = (char) c;
+}
+
+static int rdch0( void ) {
+    if ( pbpos >= 0 ) {
+        return (int)( (unsigned char) pbbuf[pbpos--] );
+    }
+    return fgetc( stdin );
+}
+
 static void rdch( void ) {
 RETRY:
-    ch = fgetc( stdin );
+    ch = rdch0();
 REEVALUATE:
     if ( ch == EOF ) return;
     if ( lno == 0 ) { ++lno; chx = 0; }
     if ( ch == '\r' ) goto RETRY;
     if ( ch == '\n' ) { ++lno; chx = 0; goto RETRY; }
     if ( ch == '-'  ) {
-        ch = fgetc( stdin );
+        ch = rdch0();
         if ( ch != '-' ) {
-            ungetc( ch, stdin );
+            putback( ch );
             ch = '-';
         } else {
             // -- comment
-            do { ch = fgetc( stdin ); } while ( ch != '\n' && ch != EOF );
+            do { ch = rdch0(); } while ( ch != '\n' && ch != EOF );
             goto REEVALUATE;
         }
     }
@@ -249,14 +276,33 @@ REEVALUATE:
     storech();
 }
 
-static void report( const char* text ) {
-    fprintf( stderr, "? %s in line %d near position %d\n", text, lno, chx );
+static void report( const char* fmt, ... ) {
+    char buf[1024];
+    va_list ap;
+    va_start( ap, fmt );
+    vsnprintf( buf, 1024U, fmt, ap );
+    va_end( ap );
+    fprintf( stderr, "? %s in line %d near position %d\n", buf, lno, chx );
     printrng();
     exit( EXIT_FAILURE );
 }
 
 static void skip_whitespace( void ) {
     while ( ch == ' ' || ch == '\t' ) rdch();
+}
+
+static treenode_t* read_hexadecimal( void ) {
+    // TOKEN hexadecimal := /\$[0-9a-fA-F]+/ .
+    if ( ch != '$' ) return 0;
+    rdch();
+    char tmp[256];
+    int  ix = 0;
+    while ( isxdigit( ch ) ) {
+        if ( ix < 255 ) tmp[ix++] = (char) ch;
+        rdch();
+    }
+    tmp[ix] = '\0';
+    return create_node( T_BIN_DATA, tmp );
 }
 
 static treenode_t* read_identifier( void ) {
@@ -266,7 +312,8 @@ static treenode_t* read_identifier( void ) {
     do {
         if ( ix < 255 ) tmp[ix++] = (char) ch;
         rdch();
-    } while ( ( ch >= '0' && ch <= '9' ) || ( ch >= 'a' && ch <= 'z' ) || ch == '-' );
+    } while ( ( ch >= '0' && ch <= '9' ) || ( ch >= 'a' && ch <= 'z' ) ||
+        ch == '-' );
     tmp[ix] = '\0';
     return create_node( T_IDENTIFIER, tmp );
 }
@@ -470,8 +517,54 @@ static treenode_t* read_brace_expr( void ) {
     return node;
 }
 
+static treenode_t* read_bin_match( void ) {
+    /*
+    bin-field-type := 'BYTE' | 'WORD' | 'DWORD' | 'QWORD' .
+    bin-match   := hexadecimal | bin-field-type [ ':' identifier |
+                    '*' identifier ]  .
+    */
+    skip_whitespace();
+    if ( ch == '$' ) {
+        return read_hexadecimal();
+    }
+    char tmp[6]; int pos = 0;
+    tmp[0] = '\0';
+    switch ( ch ) {
+        case 'B': case 'W': case 'D': case 'Q':
+            do {
+                tmp[pos++] = (char) ch;
+                rdch();
+            } while ( pos < 5 && ch >= 'A' && ch <= 'Z' );
+            tmp[pos] = '\0';
+            if ( strcmp( tmp, "BYTE" ) == 0 || strcmp( tmp, "WORD" ) == 0 ||
+                strcmp( tmp, "DWORD" ) == 0 || strcmp( tmp, "QWORD" ) == 0 ) {
+                break;
+            }
+            putback( ch );
+            while ( pos > 0 ) {
+                putback( (int)( (unsigned char) tmp[--pos] ) );
+            }
+            rdch();
+            return 0;
+        default:
+            return 0;
+    }
+    treenode_t* ident = 0;
+    if ( ch == ':' || ch == '*' ) {
+        rdch();
+        ident = read_identifier();
+        if ( ident == 0 ) {
+            report( "identifier expected after ':' or '*' in binary match");
+        }
+    }
+    treenode_t* result = create_node( T_BIN_FIELD, tmp );
+    if ( ident ) add_branch( result, ident );
+    return result;
+}
+
 static treenode_t* read_base_expr( void ) {
-    // base-expr := identifier | str-literal | regex | '(' expr ')' | '[' expr ']' | '{' expr '}' .
+    // base-expr := identifier | str-literal | regex | bin-match | '(' expr ')'
+    //              | '[' expr ']' | '{' expr '}' .
     skip_whitespace();
     switch ( ch ) {
         case '\'': case '"':    return read_str_literal();
@@ -485,7 +578,7 @@ static treenode_t* read_base_expr( void ) {
             }
             break;
     }
-    return 0;
+    return read_bin_match();
 }
 
 static treenode_t* read_and_expr( void ) {
@@ -534,7 +627,30 @@ static treenode_t* read_expr( void ) {
 
 
 static treenode_t* read_production( void ) {
-    // production  := identifier ':=' expr '.' .
+    // production  := [ 'TOKEN' ] identifier ':=' expr '.' .
+    skip_whitespace();
+    char tmp[6]; int pos = 0;
+    tmp[0] = '\0'; bool token = false;
+    switch ( ch ) {
+        case 'T':
+            do {
+                tmp[pos++] = (char) ch;
+                rdch();
+            } while ( pos < 5 && ch >= 'A' && ch <= 'Z' );
+            tmp[pos] = '\0';
+            if ( strcmp( tmp, "TOKEN" ) == 0 ) {
+                token = true;
+                break;
+            }
+            putback( ch );
+            while ( pos > 0 ) {
+                putback( (int)( (unsigned char) tmp[--pos] ) );
+            }
+            rdch();
+            return 0;
+        default:
+            return 0;
+    }
     skip_whitespace();
     treenode_t* ident;
     if ( ( ch >= '0' && ch <= '9' ) || ( ch >= 'a' && ch <= 'z' ) ) {
@@ -543,7 +659,9 @@ static treenode_t* read_production( void ) {
         return 0;
     }
     skip_whitespace();
-    if ( ch != ':' ) report( "':' expected" );
+    if ( ch != ':' ) {
+        report( "':' expected, but found '%c' (%d)", (ch&0x60?ch:'.'), ch );
+    }
     rdch();
     if ( ch != '=' ) report( "'=' expected" );
     rdch();
@@ -573,7 +691,7 @@ static treenode_t* read_prod_list( void ) {
 static treenode_t* tree = 0;
 
 static treenode_t* find_literal_helper( treenode_t* query, treenode_t* node, const char* text, token_t token ) {
-    if ( node == 0 || node == query ) return 0;
+    if ( node == 0 ) return 0;
     if ( node->token == token && strcmp( node->text, text ) == 0 ) return node;
     for ( size_t i=0; i < node->numBranches; ++i ) {
         treenode_t* result = find_literal_helper( query, node->branches[i], text, token );
@@ -592,7 +710,7 @@ static void deduplicate_literals( treenode_t** pBranch, treenode_t* node ) {
         treenode_t* found = find_literal( node, node->text, node->token );
         if ( found ) {
             *pBranch = found; found->refCnt++;
-            delete_node( node );
+            if ( node != found ) delete_node( node );
             return;
         }
     }
@@ -601,9 +719,13 @@ static void deduplicate_literals( treenode_t** pBranch, treenode_t* node ) {
     }
 }
 
+static FILE* impfp = 0;
+static FILE* hdrfp = 0;
+static char  impfile[256] = { 0, }, hdrfile[256] = { 0, };
+
 static void help( void ) {
     printf( "%s",
-        "usage: ebnfcomp [options]\n"
+        "usage: ebnfcomp [options] <file-stem>\n"
         "options:\n"
         "    --help, -h                 (this)\n"
         "    --tree, -t                 output syntax tree\n"
@@ -611,7 +733,7 @@ static void help( void ) {
         "default behavior:\n"
         "    compiles EBNF specified on standard input to internal form,\n"
         "    then outputs C or assembly language code for a parsing table to\n"
-        "    standard output.\n"
+        "    a header and implementation file named using <file-stem>.\n"
     );
 }
 
@@ -736,9 +858,9 @@ static void output_enums_helper( treenode_t* node, bool doasm ) {
                 // 00000000001111111111222222222233333333334444444444
                 // 01234567890123456789012345678901234567890123456789
                 // _NT_GENERIC             equ         0
-                printf( "%-23s equ         %d\n", tmp, cnt++ );
+                fprintf( hdrfp, "%-23s equ         %d\n", tmp, cnt++ );
             } else {
-                printf( "    %s,\n", tmp );
+                fprintf( hdrfp, "    %s,\n", tmp );
             }
 
         }
@@ -850,19 +972,21 @@ static void report2( const char* fmt, ... ) {
 static int output_branches_helper( treenode_t* node, int index ) {
     if ( node == 0 ) return 0;
     if ( node->id >= 0 && node->branchesIx == index ) {
-        printf( "    // %d: %s branches\n    ", node->branchesIx, node->exportIdent );
+        fprintf( impfp, "    // %d: %s branches\n    ", node->branchesIx,
+            node->exportIdent );
         for ( size_t i=0; i < node->numBranches; ++i ) {
             treenode_t* branch = node->branches[i]; int id;
             if ( branch->id >= 0 ) {
-                printf( "%d, ", branch->id );
-            } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
-                printf( "%d, ", id );
+                fprintf( impfp, "%d, ", branch->id );
+            } else if ( branch->token == T_IDENTIFIER &&
+                ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
+                fprintf( impfp, "%d, ", id );
             } else {
                 if ( branch->token == T_IDENTIFIER ) report2( "production '%s' not found", branch->text );
-                printf( "-1 /* %s */, ", token2text(branch->token) );
+                fprintf( impfp, "-1 /* %s */, ", token2text(branch->token) );
             }
         }
-        printf( "\n" );
+        fprintf( impfp, "\n" );
         return node->numBranches;
     }
     for ( size_t i=0; i < node->numBranches; ++i ) {
@@ -908,7 +1032,7 @@ static bool output_impls_helper( treenode_t* node, int id ) {
         } else {
             nodeClass = "NC_PRODUCTION";
         }
-        printf(
+        fprintf( impfp,
             "    // %d: %s\n"
             "    { %s, %s, %s, %s, %d, %d },\n"
             , node->id, node->exportIdent
@@ -930,9 +1054,24 @@ static void output_impls( void ) {
 }
 
 static void output_code( void ) {
-    printf( "%s",
+    char hdrsym[256];
+    snprintf( hdrsym, 256U, "%s", hdrfile );
+    char* p = hdrsym;
+    while ( *p != '\0' ) {
+        char c = *p; int iuc = (unsigned char) c;
+        if ( islower( iuc ) ) {
+            iuc = toupper( iuc );
+            c   = (char) iuc;
+        } else if ( c == '.' || c == '/' || c == '\\' || c == ':' ) {
+            c   = '_';
+        }
+        *p++ = c;
+    }
+    fprintf( hdrfp,
         "// code auto-generated by ebnfcomp; do not modify!\n"
         "// (code might get overwritten during next ebnfcomp invocation)\n\n"
+        "#ifndef %s\n"
+        "#define %s 1\n\n"
         "#include <stddef.h>\n\n"
         "typedef enum _nodeclass_t {\n"
         "    NC_TERMINAL,\n"
@@ -948,10 +1087,11 @@ static void output_code( void ) {
         "    TT_REGEX,\n"
         "} terminaltype_t;\n\n"
         "typedef enum _nodetype_t {\n"
-        "    _NT_GENERIC,\n"
+        "    _NT_GENERIC,\n",
+        hdrsym, hdrsym
     );
     output_enums_helper( tree, false );
-    printf( "%s",
+    fprintf( hdrfp, "%s",
         "} nodetype_t;\n\n"
         "typedef struct _parsingnode_t {\n"
         "    nodeclass_t        nodeClass;\n"
@@ -963,19 +1103,23 @@ static void output_code( void ) {
         "} parsingnode_t;\n\n"
     );
     output_decls_helper( tree );
-    printf(
+    fprintf( hdrfp, "#endif\n" );
+    fprintf( impfp,
+        "// code auto-generated by ebnfcomp; do not modify!\n"
+        "// (code might get overwritten during next ebnfcomp invocation)\n\n"
+        "#include \"%s\"\n\n"
         "// branches\n\n"
-        "static const int branches[%d] = {\n"
-        , branches_ix
+        "const int branches[%d] = {\n"
+        , hdrfile, branches_ix
     );
     output_branches();
-    printf(
+    fprintf( impfp,
         "};\n\n"
-        "static const parsingnode_t parsingTable[%d] = {\n"
+        "const parsingnode_t parsingTable[%d] = {\n"
         , id
     );
     output_impls();
-    printf(
+    fprintf( impfp,
         "};\n\n"
     );
 }
@@ -985,22 +1129,27 @@ static void output_code( void ) {
 static int output_branches_helper_asm( treenode_t* node, int index ) {
     if ( node == 0 ) return 0;
     if ( node->id >= 0 && node->branchesIx == index ) {
-        printf( "                        ; %d: %s branches\n"
+        fprintf( impfp,
+                "                        ; %d: %s branches\n"
                 "                        dw          ",
             node->branchesIx, node->exportIdent );
         for ( size_t i=0; i < node->numBranches; ++i ) {
             treenode_t* branch = node->branches[i]; int id;
             bool last = i == node->numBranches - 1U;
             if ( branch->id >= 0 ) {
-                printf( "%d%s ", branch->id, last?"":"," );
-            } else if ( branch->token == T_IDENTIFIER && ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
-                printf( "%d%s ", id, last?"":"," );
+                fprintf( impfp, "%d%s ", branch->id, last?"":"," );
+            } else if ( branch->token == T_IDENTIFIER &&
+                ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
+                fprintf( impfp, "%d%s ", id, last?"":"," );
             } else {
-                if ( branch->token == T_IDENTIFIER ) report2( "production '%s' not found", branch->text );
-                printf( "-1 /* %s */%s ", token2text(branch->token), last?"":"," );
+                if ( branch->token == T_IDENTIFIER ) {
+                    report2( "production '%s' not found", branch->text );
+                }
+                fprintf( impfp, "-1 /* %s */%s ", token2text(branch->token),
+                     last?"":"," );
             }
         }
-        printf( "\n" );
+        fprintf( impfp, "\n" );
         return node->numBranches;
     }
     for ( size_t i=0; i < node->numBranches; ++i ) {
@@ -1039,7 +1188,7 @@ static bool output_texts_helper_asm( treenode_t* node, int id ) {
                             first = false;
                         }
                         if ( d+4 < e ) {
-                            unsigned char hnyb = *s >> 4;
+                            unsigned char hnyb = ( *s >> 4 ) & 15;
                             unsigned char lnyb = *s & 15;
                             *d++ = '0';
                             *d++ = 'x';
@@ -1053,7 +1202,7 @@ static bool output_texts_helper_asm( treenode_t* node, int id ) {
         }
         if ( text[0] != '\0' ) {
             snprintf( labl, 256U, "prod_%d_text", node->id );
-            printf( "%-23s db          %s,0\n", labl, text );
+            fprintf( impfp, "%-23s db          %s,0\n", labl, text );
         }
         return true;
     }
@@ -1094,17 +1243,18 @@ static bool output_impls_helper_asm( treenode_t* node, int id ) {
         } else {
             nodeClass = "NC_PRODUCTION";
         }
-        printf( "                        ; %d: %s\n", node->id,
+        fprintf( impfp, "                        ; %d: %s\n", node->id,
             node->exportIdent );
-        printf( "                        db          %s, %s\n", nodeClass,
-            termType );
-        printf( "                        dw          %s, %d, %d\n",
+        fprintf( impfp, "                        db          %s, %s\n",
+            nodeClass, termType );
+        fprintf( impfp, "                        dw          %s, %d, %d\n",
             node->nodeTypeEnum, (int) node->numBranches, node->branchesIx );
         if ( numId && node->text != 0 ) {
-            printf( "                        dq          prod_%d_text\n",
+            fprintf( impfp,
+                "                        dq          prod_%d_text\n",
                 node->id );
         } else {
-            printf( "                        dq          0\n" );
+            fprintf( impfp, "                        dq          0\n" );
         }
         return true;
     }
@@ -1121,12 +1271,11 @@ static void output_impls_asm( void ) {
 }
 
 static void output_code_asm( void ) {
-    printf( "%s",
+    fprintf( hdrfp, "%s",
         "; code auto-generated by ebnfcomp; do not modify!\n"
         "; (code might get overwritten during next ebnfcomp invocation)\n\n"
         "                        cpu         x64\n"
         "                        bits        64\n\n"
-        "                        section     .rodata\n\n"
         "NC_TERMINAL             equ         0\n"
         "NC_PRODUCTION           equ         1\n"
         "NC_MANDATORY            equ         2\n"
@@ -1139,7 +1288,7 @@ static void output_code_asm( void ) {
         "_NT_GENERIC             equ         0\n"
     );
     output_enums_helper( tree, true );
-    printf( "%s",
+    fprintf( hdrfp, "%s",
         "\n"
         "                        struc      parsingnode\n"
         "                           pn_nodeClass:       resb    1\n"
@@ -1151,19 +1300,25 @@ static void output_code_asm( void ) {
         "                        endstruc\n\n"
     );
     output_decls_helper( tree );
-    printf(
-        "branches:\n"
+    fprintf( impfp,
+        "; code auto-generated by ebnfcomp; do not modify!\n"
+        "; (code might get overwritten during next ebnfcomp invocation)\n\n"
+        "                        cpu         x64\n"
+        "                        bits        64\n\n"
+        "                        %%include    \"%s\"\n\n"
+        "                        section     .rodata\n\n"
+        "branches:\n", hdrfile
     );
     output_branches_asm();
-    printf( "\n\n" );
+    fprintf( impfp, "\n\n" );
     output_texts_asm();
-    printf(
+    fprintf( impfp,
         "\n\n"
         "                        align       8,db 0\n\n"
         "parsingTable:\n"
     );
     output_impls_asm();
-    printf(
+    fprintf( impfp,
         "\n\n"
     );
 }
@@ -1174,6 +1329,7 @@ int main( int argc, char** argv ) {
 
     bool printTree = false;
     bool printAsm  = false;
+    const char* fileStem = 0;
 
     for ( int i=1; i < argc; ++i ) {
         const char* arg = argv[i];
@@ -1181,12 +1337,49 @@ int main( int argc, char** argv ) {
             help();
             return EXIT_SUCCESS;
         }
-        if ( strcmp( arg, "--tree" ) == 0 || strcmp( arg, "-t" ) == 0 ) {
+        else if ( strcmp( arg, "--tree" ) == 0 || strcmp( arg, "-t" ) == 0 ) {
             printTree = true;
         }
-        if ( strcmp( arg, "--asm" ) == 0 || strcmp( arg, "-a" ) == 0 ) {
+        else if ( strcmp( arg, "--asm" ) == 0 || strcmp( arg, "-a" ) == 0 ) {
             printAsm = true;
         }
+        else if ( fileStem == 0 && arg[0] != '-' ) {
+            fileStem = arg;
+            printf( "file stem is '%s'\n", fileStem );
+        }
+        else if ( arg[0] == '-' ) {
+            fprintf( stderr, "unknown option '%s'\n", arg );
+            return EXIT_FAILURE;
+        }
+        else {
+            fprintf( stderr, "unknown parameter '%s'\n", arg );
+            return EXIT_FAILURE;
+        }
+    }
+
+    if ( fileStem == 0 ) {
+        fprintf( stderr, "missing parameter, see --help\n" );
+        return EXIT_FAILURE;
+    }
+
+    if ( printAsm ) {
+        snprintf( impfile, 256U, "%s.nasm", fileStem );
+        snprintf( hdrfile, 256U, "%s.inc", fileStem );
+    } else {
+        snprintf( impfile, 256U, "%s.c", fileStem );
+        snprintf( hdrfile, 256U, "%s.h", fileStem );
+    }
+    impfp = fopen( impfile, "wt" );
+    if ( impfp == 0 ) {
+        fprintf( stderr, "? failed to create implementation file '%s': %m\n",
+            impfile );
+        return EXIT_FAILURE;
+    }
+    hdrfp = fopen( hdrfile, "wt" );
+    if ( hdrfp == 0 ) {
+        fprintf( stderr, "? failed to create header file '%s': %m\n",
+            hdrfile );
+        return EXIT_FAILURE;
     }
 
     rdch();

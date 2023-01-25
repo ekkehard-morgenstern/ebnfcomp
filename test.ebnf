@@ -20,30 +20,37 @@
 --    Mail: Ekkehard Morgenstern, Mozartstr. 1, 76744 Woerth am Rhein, Germany, Europe    --
 --------------------------------------------------------------------------------------------
 
-identifier  := /[a-z0-9-]+/ .
-str-literal := /'[^']+'/ | /"[^"]+"/ .
+TOKEN hexadecimal := /\$[0-9a-fA-F]+/ .
+
+TOKEN identifier  := /[a-z0-9-]+/ .
+TOKEN str-literal := /'[^']+'/ | /"[^"]+"/ .
 
 -- during parsing of regular expressions, whitespace skipping will be disabled
-re-any      := '.' .
-re-chr      := '\' /./ | /[^\/.*?[(|]/ .
+TOKEN re-any      := '.' .
+TOKEN re-chr      := '\' /./ | /[^\/.*?[(|]/ .
 
-re-cc-chr   := '\' /./ | /[^\\\]]/ .
-re-cc-rng   := re-cc-chr '-' re-cc-chr .
-re-cc-item  := re-cc-rng | re-cc-chr .
-re-cc-items := re-cc-item { re-cc-item } .
-re-cc       := '[' [ '^' ] re-cc-items ']' .
+TOKEN re-cc-chr   := '\' /./ | /[^\\\]]/ .
+TOKEN re-cc-rng   := re-cc-chr '-' re-cc-chr .
+TOKEN re-cc-item  := re-cc-rng | re-cc-chr .
+TOKEN re-cc-items := re-cc-item { re-cc-item } .
+TOKEN re-cc       := '[' [ '^' ] re-cc-items ']' .
 
-re-base-expr   := re-cc | re-chr | re-any | '(' re-expr ')' .
-re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
-re-and-expr    := re-repeat-expr { re-repeat-expr } .
-re-or-expr     := re-and-expr { '|' re-and-expr } .
-re-expr        := re-or-expr .
+TOKEN re-base-expr   := re-cc | re-chr | re-any | '(' regex ')' .
+TOKEN re-repeat-expr := re-base-expr [ '+' | '*' | '?' ] .
+TOKEN re-and-expr    := re-repeat-expr { re-repeat-expr } .
+TOKEN re-or-expr     := re-and-expr { '|' re-and-expr } .
+TOKEN regex          := re-or-expr .
 
-base-expr   := identifier | str-literal | re-expr | '(' expr ')' | '[' expr ']' | '{' expr '}' .
+bin-field-type := 'BYTE' | 'WORD' | 'DWORD' | 'QWORD' .
+
+bin-match   := hexadecimal | bin-field-type [ ':' identifier |
+             '*' identifier ]  .
+
+base-expr   := identifier | str-literal | regex | bin-match |
+               '(' expr ')' | '[' expr ']' | '{' expr '}' .
 and-expr    := base-expr { base-expr } .
 or-expr     := and-expr { '|' and-expr } .
 expr        := or-expr .
 
-production  := identifier ':=' expr '.' .
+production  := [ 'TOKEN' ] identifier ':=' expr '.' .
 prod-list   := production { production } .
-
