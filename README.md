@@ -3,9 +3,9 @@
 ## EBNF Compiler
 
 This compiler for (a variant of) Niklaus Wirth's Extended Backus-Naur Form translates an EBNF file that specifies a
-language grammar into a parsing table coded in C or assembly language, and outputs it to the standard output.
+language grammar into a parsing table coded in C or assembly language, and outputs it to the specified files (split into header and implementation).
 
-To compile it, use "make" from the command line. To run it, simply type "./ebnfcomp <inputfile".
+To compile it, use "make" from the command line. To run it, simply type "./ebnfcomp filestem &lt;inputfile", where "filestem" is the base name of the output files to be generated.
 
 If you specify the "--tree" command line option, a syntax tree of the grammar definition will be printed instead.
 
