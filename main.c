@@ -68,6 +68,17 @@ prod-list   := production { production } .
 
 */
 
+enum {
+    TB_UNDEF  = 0x00,
+    TB_DATA   = 0x01,
+    TB_BYTE   = 0x02,
+    TB_WORD   = 0x03,
+    TB_DWORD  = 0x04,
+    TB_QWORD  = 0x05,
+    TBF_PARAM = 0x10,
+    TBF_WRITE = 0x20,
+};
+
 typedef enum _token_t {
     T_EOS,
     T_IDENTIFIER,
@@ -82,6 +93,8 @@ typedef enum _token_t {
     T_PROD_LIST,
     T_BIN_DATA,
     T_BIN_FIELD,
+    T_BIN_FIELD_COUNT,
+    T_BIN_FIELD_TIMES,
 } token_t;
 
 static const char* token2text( token_t token ) {
@@ -100,6 +113,8 @@ static const char* token2text( token_t token ) {
         case T_PROD_LIST:   return "T_PROD_LIST";
         case T_BIN_DATA:    return "T_BIN_DATA";
         case T_BIN_FIELD:   return "T_BIN_FIELD";
+        case T_BIN_FIELD_COUNT:   return "T_BIN_FIELD_COUNT";
+        case T_BIN_FIELD_TIMES:   return "T_BIN_FIELD_TIMES";
     }
 }
 
@@ -298,10 +313,14 @@ static treenode_t* read_hexadecimal( void ) {
     char tmp[256];
     int  ix = 0;
     while ( isxdigit( ch ) ) {
-        if ( ix < 255 ) tmp[ix++] = (char) ch;
+        if ( ix < 253 ) tmp[ix++] = (char) ch;
         rdch();
     }
     tmp[ix] = '\0';
+    if ( ix & 1 ) {
+        memmove( &tmp[1], &tmp[0], ix+1U );
+        tmp[0] = '0';
+    }
     return create_node( T_BIN_DATA, tmp );
 }
 
@@ -549,15 +568,16 @@ static treenode_t* read_bin_match( void ) {
         default:
             return 0;
     }
-    treenode_t* ident = 0;
+    treenode_t* ident = 0; token_t t = T_BIN_FIELD;
     if ( ch == ':' || ch == '*' ) {
+        t = ch == ':' ? T_BIN_FIELD_COUNT : T_BIN_FIELD_TIMES;
         rdch();
         ident = read_identifier();
         if ( ident == 0 ) {
             report( "identifier expected after ':' or '*' in binary match");
         }
     }
-    treenode_t* result = create_node( T_BIN_FIELD, tmp );
+    treenode_t* result = create_node( t, tmp );
     if ( ident ) add_branch( result, ident );
     return result;
 }
@@ -751,6 +771,10 @@ static bool is_export_node( treenode_t* node ) {
         case T_PRODUCTION:
         case T_STR_LITERAL:
         case T_REG_EX:
+        case T_BIN_DATA:
+        case T_BIN_FIELD:
+        case T_BIN_FIELD_COUNT:
+        case T_BIN_FIELD_TIMES:
         case T_AND_EXPR:
         case T_OR_EXPR:
         case T_BRACK_EXPR:
@@ -879,9 +903,10 @@ static void name_to_C_name( char buf[256], const char* name, const char* prefix 
     }
 }
 
-static void text_to_C_text( char buf[512], const char* text ) {
-    const char* s = text; char* d = &buf[0]; char* e = &buf[510];
-    while ( *s != '\0' ) {
+static void text_to_C_text( char buf[512], const char* text, size_t len ) {
+    const char* s = text; const char* s2 = text + len;
+    char* d = &buf[0]; char* e = &buf[510];
+    while ( s < s2 ) {
         if ( *s == '\"' ) {
             if ( d+2 <= e ) {
                 *d++ = '\\';
@@ -892,8 +917,13 @@ static void text_to_C_text( char buf[512], const char* text ) {
                 *d++ = '\\';
                 *d++ = '\\';
             }
-        } else if ( d+1 <= e ) {
+        } else if ( (*s&0x60)!=0 && d+1 <= e ) {
             *d++ = *s;
+        } else if ( (*s&0x60)==0 && d+4 <= e ) {
+            *d++ = '\\';
+            *d++ = 'x';
+            *d++ = "0123456789abcdef"[(*s>>4)&15];
+            *d++ = "0123456789abcdef"[ *s    &15];
         }
         ++s;
     }
@@ -981,9 +1011,13 @@ static int output_branches_helper( treenode_t* node, int index ) {
             } else if ( branch->token == T_IDENTIFIER &&
                 ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
                 fprintf( impfp, "%d, ", id );
-            } else {
+            } else if ( node->token != T_BIN_DATA &&
+                ( node->token < T_BIN_FIELD ||
+                  node->token > T_BIN_FIELD_TIMES ) ) {
                 if ( branch->token == T_IDENTIFIER ) report2( "production '%s' not found", branch->text );
                 fprintf( impfp, "-1 /* %s */, ", token2text(branch->token) );
+            } else {
+                fprintf( impfp, "-2 /* %s */, ", token2text(branch->token) );
             }
         }
         fprintf( impfp, "\n" );
@@ -1006,15 +1040,20 @@ static bool output_impls_helper( treenode_t* node, int id ) {
     if ( node == 0 ) return false;
     if ( node->id == id ) {
         bool numId = node->token != T_PRODUCTION;
-        char text[1024]; const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
+        char text[1024]; const char* termType = "TT_UNDEF";
+        const char* nodeClass = "???";
         text[0] = '0'; text[1] = '\0';
         if ( numId ) {
-            if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
+            if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ||
+                node->token == T_BIN_DATA || ( node->token >= T_BIN_FIELD &&
+                node->token <= T_BIN_FIELD_TIMES ) ) {
                 nodeClass = "NC_TERMINAL";
                 if ( node->token == T_STR_LITERAL ) {
                     termType = "TT_STRING";
-                } else { // T_REG_EX
+                } else if ( node->token == T_REG_EX ) {
                     termType = "TT_REGEX";
+                } else { // T_BIN_DATA or T_BIN_FIELD
+                    termType = "TT_BINARY";
                 }
             } else {
                 switch ( node->token ) {
@@ -1026,7 +1065,50 @@ static bool output_impls_helper( treenode_t* node, int id ) {
                 }
             }
             if ( node->text ) {
-                char tmp[512]; text_to_C_text( tmp, node->text );
+                char tmp[512];
+                tmp[0] = '\0';
+                if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
+                    text_to_C_text( tmp, node->text, strlen( node->text ) );
+                } else if ( node->token == T_BIN_DATA ) {
+                    const char* s   = node->text;
+                    size_t      len = strlen( s );
+                    size_t      nb  = len / 2U;
+                    size_t      i;
+                    char        tmp2[256];
+                    if ( nb > 256U ) nb = 256U;
+                    for ( i=0; i < nb; ++i ) {
+                        char c[3]; int x = 0;
+                        c[0] = *s++;
+                        c[1] = *s++;
+                        c[2] = '\0';
+                        sscanf( c, "%x", &x );
+                        tmp2[i] = (char) x;
+                    }
+                    text_to_C_text( tmp, tmp2, nb );
+                } else if ( node->token >= T_BIN_FIELD &&
+                    node->token <= T_BIN_FIELD_TIMES ) {
+                    int v = 0;
+                    if ( strcmp( node->text, "BYTE" ) == 0 ) {
+                        v |= TB_BYTE;
+                    }
+                    else if ( strcmp( node->text, "WORD" ) == 0 ) {
+                        v |= TB_WORD;
+                    }
+                    else if ( strcmp( node->text, "DWORD" ) == 0 ) {
+                        v |= TB_DWORD;
+                    }
+                    else if ( strcmp( node->text, "QWORD" ) == 0 ) {
+                        v |= TB_QWORD;
+                    }
+                    if ( node->numBranches > 0U ) {
+                        v |= TBF_PARAM;
+                    }
+                    if ( node->token == T_BIN_FIELD_COUNT ) {
+                        v |= TBF_WRITE;
+                    }
+                    char b = (char) v;
+                    text_to_C_text( tmp, &b, 1U );
+                }
                 snprintf( text, 1024U, "\"%s\"", tmp );
             }
         } else {
@@ -1085,7 +1167,18 @@ static void output_code( void ) {
         "    TT_UNDEF,\n"
         "    TT_STRING,\n"
         "    TT_REGEX,\n"
+        "    TT_BINARY,\n"
         "} terminaltype_t;\n\n"
+        "enum {\n"
+        "    TB_UNDEF  = 0x00,\n"
+        "    TB_DATA   = 0x01,\n"
+        "    TB_BYTE   = 0x02,\n"
+        "    TB_WORD   = 0x03,\n"
+        "    TB_DWORD  = 0x04,\n"
+        "    TB_QWORD  = 0x05,\n"
+        "    TBF_PARAM = 0x10,\n"
+        "    TBF_WRITE = 0x20,\n"
+        "};\n\n"
         "typedef enum _nodetype_t {\n"
         "    _NT_GENERIC,\n",
         hdrsym, hdrsym
@@ -1141,12 +1234,19 @@ static int output_branches_helper_asm( treenode_t* node, int index ) {
             } else if ( branch->token == T_IDENTIFIER &&
                 ( id = find_prod_id( tree, branch->text ) ) >= 0 ) {
                 fprintf( impfp, "%d%s ", id, last?"":"," );
-            } else {
+            } else if ( node->token != T_BIN_DATA &&
+                ( node->token < T_BIN_FIELD ||
+                  node->token > T_BIN_FIELD_TIMES ) ) {
                 if ( branch->token == T_IDENTIFIER ) {
                     report2( "production '%s' not found", branch->text );
                 }
-                fprintf( impfp, "-1 /* %s */%s ", token2text(branch->token),
-                     last?"":"," );
+                fprintf( impfp, "-1 ; %s%s",
+                    token2text(branch->token),
+                    (last?"":"\n                        dw          ") );
+            } else {
+                fprintf( impfp, "-2 ; %s%s",
+                    token2text(branch->token),
+                    (last?"":"\n                        dw          ") );
             }
         }
         fprintf( impfp, "\n" );
@@ -1165,6 +1265,73 @@ static void output_branches_asm( void ) {
     }
 }
 
+static void text_as_source_asm( char* buf, size_t bufsz, const char* s ) {
+    char tmp[512];
+    if ( text_to_asm_text( tmp, s, '\'' ) ) {
+        snprintf( buf, bufsz, "'%s'", tmp );
+    } else if ( text_to_asm_text( tmp, s, '"' ) ) {
+        snprintf( buf, bufsz, "\"%s\"", tmp );
+    } else {
+        bool first = true;
+        char* d = buf; char* e = &buf[bufsz-1U];
+        while ( *s != '\0' ) {
+            if ( !first ) {
+                if ( d+1 < e ) *d++ = ',';
+            } else {
+                first = false;
+            }
+            if ( d+4 < e ) {
+                unsigned char hnyb = ( *s >> 4 ) & 15;
+                unsigned char lnyb = *s & 15;
+                *d++ = '0';
+                *d++ = 'x';
+                *d++ = "0123456789abcdef"[hnyb];
+                *d++ = "0123456789abcdef"[lnyb];
+            }
+            ++s;
+        }
+        *d = '\0';
+    }
+}
+
+static void dump_as_source_asm( char* buf, size_t bufsz, const char* s ) {
+    size_t len = strlen(s);
+    if ( len & 1U ) report( "unexpected odd length in string '%s'", s );
+    size_t nbytes = len / 2U;
+    char* p = buf; char* e = &buf[bufsz-1U];
+    if ( p + 7 < e ) {
+        strcpy( p, "TB_DATA" );
+        p += 7;
+    }
+    if ( p + 5 < e ) {
+        *p++ = ',';
+        *p++ = '0';
+        *p++ = 'x';
+        *p++ = "0123456789abcdef"[(nbytes>>4U)&15U];
+        *p++ = "0123456789abcdef"[ nbytes     &15U];
+    }
+    for ( size_t i=0; i < nbytes; ++i ) {
+        // bool last = i == nbytes-1U;
+        if ( p + 5 >= e ) {
+            report( "object too large during output at '%s'", s );
+        }
+        else {
+            *p++ = ',';
+            *p++ = '0';
+            *p++ = 'x';
+            *p++ = *s++;
+            *p++ = *s++;
+        }
+    }
+    *p = '\0';
+}
+
+static void field_as_source_asm( char* buf, size_t bufsz, treenode_t* node ) {
+    snprintf( buf, bufsz, "TB_%s%s%s", node->text,
+        (node->numBranches?"|TBF_PARAM":""), (node->token==T_BIN_FIELD_COUNT?
+        "|TBF_WRITE":"") );
+}
+
 static bool output_texts_helper_asm( treenode_t* node, int id ) {
     if ( node == 0 ) return false;
     if ( node->id == id ) {
@@ -1172,37 +1339,25 @@ static bool output_texts_helper_asm( treenode_t* node, int id ) {
         char text[1024], labl[256];
         text[0] = '\0';
         if ( numId ) {
-            if ( node->text ) {
-                char tmp[512];
-                if ( text_to_asm_text( tmp, node->text, '\'' ) ) {
-                    snprintf( text, 1024U, "'%s'", tmp );
-                } else if ( text_to_asm_text( tmp, node->text, '"' ) ) {
-                    snprintf( text, 1024U, "\"%s\"", tmp );
-                } else {
-                    const char* s = node->text; bool first = true;
-                    char* d = text; char* e = &text[1023];
-                    while ( *s != '\0' ) {
-                        if ( !first ) {
-                            if ( d+1 < e ) *d++ = ',';
-                        } else {
-                            first = false;
-                        }
-                        if ( d+4 < e ) {
-                            unsigned char hnyb = ( *s >> 4 ) & 15;
-                            unsigned char lnyb = *s & 15;
-                            *d++ = '0';
-                            *d++ = 'x';
-                            *d++ = "0123456789abcdef"[hnyb];
-                            *d++ = "0123456789abcdef"[lnyb];
-                        }
-                    }
-                    *d = '\0';
-                }
+            if ( ( node->token == T_STR_LITERAL || node->token == T_REG_EX )
+                && node->text ) {
+                text_as_source_asm( text, 1024U, node->text );
+            } else if ( node->token == T_BIN_DATA ) {
+                dump_as_source_asm( text, 1024U, node->text );
+            } else if ( node->token >= T_BIN_FIELD &&
+                node->token <= T_BIN_FIELD_TIMES ) {
+                field_as_source_asm( text, 1024U, node );
             }
         }
-        if ( text[0] != '\0' ) {
+        if ( text[0] != '\0' && ( node->token == T_STR_LITERAL ||
+            node->token == T_REG_EX ) ) {
             snprintf( labl, 256U, "prod_%d_text", node->id );
             fprintf( impfp, "%-23s db          %s,0\n", labl, text );
+        } else if ( text[0] != '\0' && ( node->token == T_BIN_DATA ||
+            ( node->token >= T_BIN_FIELD &&
+              node->token <= T_BIN_FIELD_TIMES  ) ) ) {
+            snprintf( labl, 256U, "prod_%d_text", node->id );
+            fprintf( impfp, "%-23s db          %s\n", labl, text );
         }
         return true;
     }
@@ -1224,12 +1379,16 @@ static bool output_impls_helper_asm( treenode_t* node, int id ) {
         bool numId = node->token != T_PRODUCTION;
         const char* termType = "TT_UNDEF"; const char* nodeClass = "???";
         if ( numId ) {
-            if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ) {
+            if ( node->token == T_STR_LITERAL || node->token == T_REG_EX ||
+                node->token == T_BIN_DATA || ( node->token >= T_BIN_FIELD &&
+                node->token <= T_BIN_FIELD_TIMES ) ) {
                 nodeClass = "NC_TERMINAL";
                 if ( node->token == T_STR_LITERAL ) {
                     termType = "TT_STRING";
-                } else { // T_REG_EX
+                } else if ( node->token == T_REG_EX ) {
                     termType = "TT_REGEX";
+                } else { // T_BIN_DATA or T_BIN_FIELD
+                    termType = "TT_BINARY";
                 }
             } else {
                 switch ( node->token ) {
@@ -1284,7 +1443,16 @@ static void output_code_asm( void ) {
         "NC_OPTIONAL_REPETITIVE  equ         5\n\n"
         "TT_UNDEF                equ         0\n"
         "TT_STRING               equ         1\n"
-        "TT_REGEX                equ         2\n\n"
+        "TT_REGEX                equ         2\n"
+        "TT_BINARY               equ         3\n\n"
+        "TB_UNDEF                equ         0x00\n"
+        "TB_DATA                 equ         0x01\n"
+        "TB_BYTE                 equ         0x02\n"
+        "TB_WORD                 equ         0x03\n"
+        "TB_DWORD                equ         0x04\n"
+        "TB_QWORD                equ         0x05\n"
+        "TBF_PARAM               equ         0x10\n"
+        "TBF_WRITE               equ         0x20\n\n"
         "_NT_GENERIC             equ         0\n"
     );
     output_enums_helper( tree, true );
