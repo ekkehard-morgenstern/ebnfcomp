@@ -667,9 +667,9 @@ static treenode_t* read_production( void ) {
                 putback( (int)( (unsigned char) tmp[--pos] ) );
             }
             rdch();
-            return 0;
+            break;
         default:
-            return 0;
+            break;
     }
     skip_whitespace();
     treenode_t* ident;
